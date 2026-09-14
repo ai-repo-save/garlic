@@ -25,6 +25,8 @@ void apk_status(jd_apk *apk)
 void apk_entry_thread_task(jd_meta_dex *meta)
 {
     thread_local_data *tls = get_thread_local_data();
+    if (tls == NULL)
+        return;
     tls->pool = mem_create_pool();
 
     dex_analyse_in_apk_task(meta);
@@ -36,6 +38,8 @@ void apk_entry_thread_task(jd_meta_dex *meta)
 void apk_decompile_thread_task(jd_dex_task *task)
 {
     thread_local_data *tls = get_thread_local_data();
+    if (tls == NULL)
+        return;
     tls->pool = mem_create_pool();
 
     jd_dex *dex = task->dex;
@@ -58,6 +62,8 @@ void apk_decompile_thread_task(jd_dex_task *task)
 void apk_smali_thread_task(jd_dex_task *task)
 {
     thread_local_data *tls = get_thread_local_data();
+    if (tls == NULL)
+        return;
     tls->pool = mem_create_pool();
 
     jd_dex *dex = task->dex;

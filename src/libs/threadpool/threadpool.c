@@ -11,11 +11,17 @@ static void *threadpool_thread(void *threadpool);
 
 int threadpool_free(threadpool_t *pool);
 
-void create_tls_key() {
+static pthread_key_t tls_key;
+static pthread_once_t tls_init_once = PTHREAD_ONCE_INIT;
+
+static void create_tls_key(void)
+{
     pthread_key_create(&tls_key, NULL);
 }
 
-thread_local_data* get_thread_local_data() {
+thread_local_data* get_thread_local_data(void)
+{
+    pthread_once(&tls_init_once, create_tls_key);
     return pthread_getspecific(tls_key);
 }
 
