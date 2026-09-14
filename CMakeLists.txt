@@ -93,6 +93,22 @@ set(HTTP_SERVER
     src/ai/http_server.c
 )
 
+set(TREE_SITTER
+    src/libs/tree-sitter/src/lib.c
+    src/libs/tree-sitter-java/parser.c
+)
+set_property(SOURCE src/libs/tree-sitter/src/lib.c APPEND PROPERTY
+    INCLUDE_DIRECTORIES
+    ${CMAKE_SOURCE_DIR}/src/libs/tree-sitter/src
+    ${CMAKE_SOURCE_DIR}/src/libs/tree-sitter/include)
+set_property(SOURCE src/libs/tree-sitter-java/parser.c APPEND PROPERTY
+    INCLUDE_DIRECTORIES
+    ${CMAKE_SOURCE_DIR}/src/libs/tree-sitter-java)
+set_source_files_properties(
+    src/libs/tree-sitter/src/lib.c
+    src/libs/tree-sitter-java/parser.c
+    PROPERTIES C_STANDARD 11)
+
 set(JAVA_DEC
         ${COMMON}
         ${MEMORY_POOL}
@@ -118,7 +134,10 @@ set(JAVA_DEC
         ${MD4C}
         ${REPORT}
         ${HTTP_SERVER}
+        ${TREE_SITTER}
 )
+include_directories(src/libs/tree-sitter/include)
+include_directories(src/libs/tree-sitter-java)
 
 # ---------------------------------------------------------------------------
 # librosemarylib — locate the pre-built shared library for the target
@@ -268,3 +287,6 @@ if (RELEASE)
     endif ()
 
 endif ()
+
+add_executable(dex_format_decode_test tests/dex_format_decode_test.c)
+

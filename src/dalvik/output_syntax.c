@@ -2,7 +2,11 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include <string.h>
+#include <tree_sitter/api.h>
+
+const TSLanguage *tree_sitter_java(void);
 
 static char* read_whole_file(const char *path, size_t *out_len)
 {
@@ -39,107 +43,33 @@ static char* read_whole_file(const char *path, size_t *out_len)
     return buf;
 }
 
-static const char* probe_java(const char *src)
+static int java_has_parse_error(const char *src, uint32_t len)
 {
-    int braces = 0;
-    int parens = 0;
-    const char *p = src;
+    TSParser *parser;
+    TSTree *tree;
+    TSNode root;
+    int err;
 
-    if (strstr(src, "if_true_block") != NULL)
-        return "CFG node name leaked: if_true_block";
-    if (strstr(src, "if_false_block") != NULL)
-        return "CFG node name leaked: if_false_block";
-    if (strstr(src, "public static  {") != NULL ||
-        strstr(src, "static  {") != NULL)
-        return "clinit written without a method name";
-    if (strstr(src, "[][]{}") != NULL)
-        return "new-array printed as empty 2-D initializer";
-    if (strstr(src, " class;") != NULL || strstr(src, "\tclass;") != NULL)
-        return "keyword class used as an identifier";
-    if (strstr(src, "import ") != NULL && strchr(src, '$') != NULL)
-        return "inner-class import used $\ instead of .";
-
-    while (*p) {
-        if (p[0] == '/' && p[1] == '/') {
-            while (*p && *p != '\n')
-                p++;
-            continue;
-        }
-        if (p[0] == '/' && p[1] == '*') {
-            p += 2;
-            while (*p && !(p[0] == '*' && p[1] == '/'))
-                p++;
-            if (*p)
-                p += 2;
-            continue;
-        }
-        if (*p == '"' || *p == '\'') {
-            char q = *p++;
-            while (*p && *p != q) {
-                if (*p == '\\' && p[1])
-                    p++;
-                p++;
-            }
-            if (*p)
-                p++;
-            continue;
-        }
-        if (*p == '{')
-            braces++;
-        else if (*p == '}')
-            braces--;
-        else if (*p == '(')
-            parens++;
-        else if (*p == ')')
-            parens--;
-        if (braces < 0)
-            return "unmatched }";
-        if (parens < 0)
-            return "unmatched )";
-        p++;
+    parser = ts_parser_new();
+    if (parser == NULL)
+        return 0;
+    if (!ts_parser_set_language(parser, tree_sitter_java())) {
+        ts_parser_delete(parser);
+        return 0;
     }
-    if (braces != 0)
-        return "unbalanced braces";
-    if (parens != 0)
-        return "unbalanced parentheses";
-    return NULL;
+    tree = ts_parser_parse_string(parser, NULL, src, len);
+    if (tree == NULL) {
+        ts_parser_delete(parser);
+        return 0;
+    }
+    root = ts_tree_root_node(tree);
+    err = ts_node_has_error(root);
+    ts_tree_delete(tree);
+    ts_parser_delete(parser);
+    return err;
 }
 
-static const char* probe_smali(const char *src)
-{
-    const char *p = src;
-
-    while (*p) {
-        const char *line = p;
-        const char *nl = strchr(p, '\n');
-        size_t n = nl ? (size_t)(nl - p) : strlen(p);
-
-        if (n > 10 && strncmp(line, "\tnew-array ", 11) == 0) {
-            const char *type = line + n;
-            while (type > line && type[-1] != ' ' && type[-1] != ',')
-                type--;
-            if (type[0] >= '0' && type[0] <= '9')
-                return "new-array type printed as numeric id";
-        }
-        if (strstr(line, "aput-char ") != NULL ||
-            strstr(line, "aget-char ") != NULL) {
-            const char *comma = strrchr(line, ',');
-            if (comma) {
-                comma++;
-                while (*comma == ' ')
-                    comma++;
-                if (*comma >= '0' && *comma <= '9')
-                    return "23x third operand printed as immediate";
-            }
-        }
-        p = nl ? nl + 1 : p + n;
-        if (!nl)
-            break;
-    }
-    return NULL;
-}
-
-static int prepend_header(const char *path, const char *kind, const char *reason)
+static int prepend_header(const char *path, const char *reason)
 {
     size_t len = 0;
     char *src = read_whole_file(path, &len);
@@ -152,7 +82,6 @@ static int prepend_header(const char *path, const char *kind, const char *reason
         free(src);
         return 0;
     }
-
     f = fopen(path, "wb");
     if (f == NULL) {
         free(src);
@@ -161,14 +90,13 @@ static int prepend_header(const char *path, const char *kind, const char *reason
     fprintf(f,
             "/*\n"
             " * %s\n"
-            " * checker: garlic-syntax-probe\n"
+            " * checker: tree-sitter-java\n"
             " * reason: %s\n"
             " */\n",
             marker, reason);
     fwrite(src, 1, len, f);
     fclose(f);
     free(src);
-    (void)kind;
     return 0;
 }
 
@@ -176,15 +104,13 @@ void jd_output_mark_syntax(const char *path, int is_smali)
 {
     size_t len = 0;
     char *src;
-    const char *reason;
 
-    if (path == NULL)
+    if (path == NULL || is_smali)
         return;
     src = read_whole_file(path, &len);
     if (src == NULL)
         return;
-    reason = is_smali ? probe_smali(src) : probe_java(src);
+    if (java_has_parse_error(src, (uint32_t)len))
+        prepend_header(path, "tree-sitter-java reported a parse error");
     free(src);
-    if (reason != NULL)
-        prepend_header(path, is_smali ? "smali" : "java", reason);
 }
