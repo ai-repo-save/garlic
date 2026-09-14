@@ -19,6 +19,15 @@ static inline u1 dex_field_b_nibble(u2 u0)
     return (u1)(u0 >> 12);
 }
 
+/* 11n high nibble of the second byte, sign-extended. */
+static inline s1 dex_field_high_signed_nibble(u2 u0)
+{
+    s1 n = (s1)((u0 >> 12) & 0x0F);
+    if (n & 0x08)
+        n = (s1)(n | ~0x0F);
+    return n;
+}
+
 /* 23x second unit is CC|BB: low byte vBB, high byte vCC. */
 static inline u1 dex_field_23x_bb(u2 unit)
 {

@@ -160,8 +160,8 @@ static void smali_write_method(jd_meta_dex *dex,
             }
             case DEX_INS_CONST_4: { // const/4
                 // const/4 vA, #+B
-                s1 v_a = ((s4)*item >> 8) & 0x0F;
-                s1 v_b = (s4)*item >> 12;
+                u1 v_a = dex_field_a_nibble(*item);
+                s1 v_b = dex_field_high_signed_nibble(*item);
                 fprintf(_smali_stream(stream), "v%d, %d\n", v_a, v_b);
                 break;
             }
@@ -858,12 +858,12 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_SHL_INT_LIT8:
             case DEX_INS_SHR_INT_LIT8:
             case DEX_INS_USHR_INT_LIT8: {
-                u1 v_a = (*item >> 8);
-                s2 second = code->insns[i+1];
-                s1 v_c = second >> 8;
-                s1 v_b = second & 0x0F;
+                u1 v_a = dex_field_aa(*item);
+                u2 second = code->insns[i+1];
+                u1 v_b = second & 0xFF;
+                s1 v_c = (s1)(second >> 8);
                 fprintf(_smali_stream(stream),
-                        "v%d v%d %d\n",
+                        "v%d, v%d, %d\n",
                         v_a,
                         v_b,
                         v_c);
@@ -877,10 +877,10 @@ static void smali_write_method(jd_meta_dex *dex,
                 u2 v_bbbb = code->insns[i+1];
                 u2 v_hhhh = code->insns[i+3];
                 u2 second = code->insns[i+2];
-                u1 v_c = second >> 12;
-                u1 v_d = (second >> 8) & 0x0F;
-                u1 v_e = (second >> 4) & 0x0F;
-                u1 v_f = second & 0x0F;
+                u1 v_c = second & 0x0F;
+                u1 v_d = (second >> 4) & 0x0F;
+                u1 v_e = (second >> 8) & 0x0F;
+                u1 v_f = second >> 12;
 
                 switch (v_a) {
                     case 1: {
