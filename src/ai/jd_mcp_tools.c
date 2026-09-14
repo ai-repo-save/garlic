@@ -37,6 +37,12 @@ static const char* garlic_bin(void)
     "\"path\":{\"type\":\"string\",\"description\":\"Path to a .class (Java bytecode) or .dex (Dalvik bytecode) file. Shows the internal structure — methods, fields, constants, annotations, and signatures — without performing a full decompilation.\"}"  \
     "},\"required\":[\"path\"]}"
 
+#define SCHEMA_SMALI  \
+    "{\"type\":\"object\",\"properties\":{"  \
+    "\"path\":{\"type\":\"string\",\"description\":\"Path to an APK (.apk) or DEX (.dex) file.\"},"  \
+    "\"class_name\":{\"type\":\"string\",\"description\":\"Java class name such as ms.bd.o.h2, or a DEX descriptor such as Lms/bd/o/h2;. Returns smali generated from bytecode without running the Java decompiler. Use this when Java output is missing or unreadable.\"}"  \
+    "},\"required\":[\"path\",\"class_name\"]}"
+
 #define SCHEMA_CALL_GRAPH  \
     "{\"type\":\"object\",\"properties\":{"  \
     "\"path\":{\"type\":\"string\",\"description\":\"Path to a .dex (Dalvik bytecode) or .apk (Android package) file from which to generate the call graph.\"},"  \
@@ -121,6 +127,11 @@ const jd_mcp_tool MCP_TOOLS[] = {
         .name         = "dump_info",
         .description  = "Quick-inspect the internal structure of a .class or .dex file — methods, fields, constants, annotations, and signatures — similar to javap / dexdump. Use this for fast validation or API-surface inspection without generating full decompiled source.",
         .input_schema = SCHEMA_DUMP_INFO,
+    },
+    {
+        .name         = "smali",
+        .description  = "Return smali for one class from an APK or DEX file. Reads Dalvik bytecode directly and does not run the Java decompiler. Use when Java decompilation failed or is unreadable. class_name accepts a Java name (ms.bd.o.h2) or a DEX descriptor (Lms/bd/o/h2;).",
+        .input_schema = SCHEMA_SMALI,
     },
     {
         .name         = "call_graph",
@@ -745,6 +756,26 @@ static string tool_dump_info(jd_mcp_server *server, const char *path)
         free(raw);
         return str_create_in(pool,
             "Error: dump_info failed (exit=%d; file may be unsupported)", rc);
+    }
+    char *result = str_create_in(pool, "%s", raw);
+    free(raw);
+    return result;
+}
+
+static string tool_smali(jd_mcp_server *server, const char *path,
+                         const char *class_name)
+{
+    mem_pool *pool = server->pool;
+    const char *argv[] = {
+        garlic_bin(), path, "-s", "-c", class_name, NULL
+    };
+    char *raw = NULL;
+    int rc = exec_process(argv, NULL, true, &raw);
+    if (rc != 0 || !raw || raw[0] == '\0') {
+        free(raw);
+        if (rc == 1)
+            return str_create_in(pool, "Error: class not found: %s", class_name);
+        return str_create_in(pool, "Error: smali failed (exit=%d)", rc);
     }
     char *result = str_create_in(pool, "%s", raw);
     free(raw);
@@ -1851,6 +1882,7 @@ void mcp_handle_tools_call(jd_mcp_server *server, unsigned id,
 
     if (STR_EQL(tool_name, "decompile") ||
         STR_EQL(tool_name, "dump_info") ||
+        STR_EQL(tool_name, "smali") ||
         STR_EQL(tool_name, "call_graph") ||
         STR_EQL(tool_name, "analyze") ||
         STR_EQL(tool_name, "analyze_elf"))
@@ -1887,6 +1919,16 @@ void mcp_handle_tools_call(jd_mcp_server *server, unsigned id,
             output = tool_decompile(server, file_path, output_dir);
         else if (STR_EQL(tool_name, "dump_info"))
             output = tool_dump_info(server, file_path);
+        else if (STR_EQL(tool_name, "smali")) {
+            cJSON *class_json = cJSON_GetObjectItem(args, "class_name");
+            if (!class_json || !cJSON_IsString(class_json) ||
+                strlen(class_json->valuestring) == 0) {
+                jd_mcp_send_error(id, JD_MCP_ERROR_INVALID_PARAMS,
+                                  "smali requires 'class_name' (string)");
+                return;
+            }
+            output = tool_smali(server, file_path, class_json->valuestring);
+        }
         else if (STR_EQL(tool_name, "call_graph"))
             output = tool_call_graph(server, file_path, output_dir);
         else if (STR_EQL(tool_name, "analyze_elf"))

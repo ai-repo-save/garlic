@@ -13,6 +13,7 @@
 #include "rosemary/rosemary_embed.h"
 /* License verification */
 #include "ai/http_server.h"
+#include <stdio.h>
 
 typedef enum {
     JD_FILE_TYPE_UNKNOWN = 0,
@@ -35,6 +36,7 @@ typedef enum {
 typedef struct jd_opt {
     char *path;
     char *out;
+    char *class_name;
     jd_file_type_t ft;
     int option;
     int thread_num;
@@ -130,12 +132,13 @@ static void prepare_opt_threads(jd_opt *opt) {
 }
 
 static void opt_usage(const char *progname) {
-    fprintf(stderr, "Usage: %s file [-p] [-o outpath] [-t num] [-g] [-s]\n", progname);
+    fprintf(stderr, "Usage: %s file [-p] [-o outpath] [-t num] [-g] [-s] [-c class]\n", progname);
     fprintf(stderr, "    -p: like javap or dexdump, print class info\n");
     fprintf(stderr, "    -o: output path for jar/dex/war files\n");
     fprintf(stderr, "    -t: number of threads to use (default is 4)\n");
     fprintf(stderr, "    -g: generate call graph for dex/apk\n");
     fprintf(stderr, "    -s: apk/dex to smali\n");
+    fprintf(stderr, "    -c: with -s, write one class smali to stdout (or -o file)\n");
     fprintf(stderr, "    -n: analyze native libs\n");
     fprintf(stderr, "    -m: start MCP server (stdio protocol)\n");
     fprintf(stderr, "    --serve [dir] [port]: start HTTP server (default: . 8080)\n");
@@ -161,7 +164,7 @@ static jd_opt* parse_opt(int argc, char **argv) {
     opt->path = path;
     opt->ft = ft;
 
-    while ((oc = getopt(argc, argv, "spo:t:ghmn")) != -1) {
+    while ((oc = getopt(argc, argv, "spo:t:ghmnc:")) != -1) {
         switch (oc) {
             case 'p': { // like javap
                 opt->option = JD_FILE_OPTION_DUMP;
@@ -176,6 +179,10 @@ static jd_opt* parse_opt(int argc, char **argv) {
             }
             case 's': {
                 opt->option = JD_FILE_OPTION_SMALI;
+                break;
+            }
+            case 'c': {
+                opt->class_name = optarg;
                 break;
             }
             case 'g': {
@@ -251,6 +258,36 @@ static void run_for_jvm_jar(jd_opt *opt) {
     printf("Thread   : %d\n", opt->thread_num);
     jar_file_analyse(opt->path, opt->out, opt->thread_num);
     printf("\n[Done]\n");
+}
+
+static int run_for_class_smali(jd_opt *opt)
+{
+    FILE *stream = stdout;
+    FILE *file = NULL;
+    int rc;
+
+    if (opt->out != NULL) {
+        file = fopen(opt->out, "wb");
+        if (file == NULL) {
+            fprintf(stderr, "[garlic] Cannot write smali to %s\n", opt->out);
+            return 2;
+        }
+        stream = file;
+    }
+
+    rc = dex_smali_write_class_from_path(opt->path, opt->class_name, stream);
+    if (file != NULL)
+        fclose(file);
+
+    if (rc == 1) {
+        fprintf(stderr, "[garlic] Class not found: %s\n", opt->class_name);
+        return 1;
+    }
+    if (rc != 0) {
+        fprintf(stderr, "[garlic] Failed to write smali for %s\n", opt->class_name);
+        return 2;
+    }
+    return 0;
 }
 
 static void run_for_dex(jd_opt *opt)
@@ -359,6 +396,12 @@ int main(int argc, char **argv)
     }
 
     jd_opt *opt = parse_opt(argc, argv);
+
+    if (opt->class_name != NULL) {
+        int rc = run_for_class_smali(opt);
+        free_opt(opt);
+        return rc;
+    }
 
     if (opt->option == JD_FILE_OPTION_ELF_ANALYSIS) {
         printf("[Garlic] ELF binary analysis\n");
