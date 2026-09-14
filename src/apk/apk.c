@@ -7,6 +7,9 @@
 #include "decompiler/expression_writter.h"
 #include "dex_smali.h"
 #include "apk_manifest.h"
+#include "dalvik/output_syntax.h"
+#include "dalvik/dex_meta_helper.h"
+#include "decompiler/klass.h"
 
 static int apk_progress_len = 0;
 
@@ -51,6 +54,11 @@ void apk_decompile_thread_task(jd_dex_task *task)
     if (jf->parent == NULL) {
         writter_for_class(jf, NULL);
         fclose(jf->source);
+        if (dex->meta->source_dir != NULL && jf->pname != NULL && jf->sname != NULL) {
+            string path = str_create("%s/%s/%s.java", dex->meta->source_dir,
+                                     jf->pname, jf->sname);
+            jd_output_mark_syntax(path, 0);
+        }
     }
 
     mem_pool_free(tls->pool);
@@ -76,6 +84,15 @@ void apk_smali_thread_task(jd_dex_task *task)
 
     if (stream != NULL)
         fclose(stream);
+    if (dex->meta->source_dir != NULL) {
+        string desc = dex_str_of_type_id(dex->meta, cf->class_idx);
+        string fname = class_full_name(desc);
+        string sname = class_simple_name_without_primitive(fname);
+        string pname = class_package_name_of(fname);
+        string path = str_create("%s/%s/%s.smali", dex->meta->source_dir,
+                                 pname, sname);
+        jd_output_mark_syntax(path, 1);
+    }
 
     mem_pool_free(tls->pool);
     tls->pool = NULL;

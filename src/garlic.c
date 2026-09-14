@@ -6,6 +6,7 @@
 #include "apk/apk.h"
 #include "dalvik/dex_decompile.h"
 #include "dex_smali.h"
+#include "dalvik/output_syntax.h"
 #include "analyzer/jd_analyzer.h"
 #include "ai/jd_mcp.h"
 #include <unistd.h>
@@ -278,6 +279,8 @@ static int run_for_class_smali(jd_opt *opt)
     rc = dex_smali_write_class_from_path(opt->path, opt->class_name, stream);
     if (file != NULL)
         fclose(file);
+    if (rc == 0 && opt->out != NULL)
+        jd_output_mark_syntax(opt->out, 1);
 
     if (rc == 1) {
         fprintf(stderr, "[garlic] Class not found: %s\n", opt->class_name);

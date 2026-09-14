@@ -390,8 +390,8 @@ static inline u8 dex_ins_parameter_23x(jd_dex_ins *ins, int number)
     u2 item = ins->param[0];
     u1 v_a = (item >> 8);
     u2 second = ins->param[1];
-    u1 v_b = second >> 8;
-    u1 v_c = second & 0xFF;
+    u1 v_b = second & 0xFF;
+    u1 v_c = second >> 8;
 
     switch (number) {
         case 0:
@@ -467,8 +467,8 @@ static inline void dex_ins_use_def_22b(jd_dex_ins *ins)
 static inline u8 dex_ins_parameter_22t(jd_dex_ins *ins, int number)
 {
     u2 item = ins->param[0];
-    u1 v_a = item >> 12;
-    u1 v_b = (item >> 8) & 0x0F;
+    u1 v_a = (item >> 8) & 0x0F;
+    u1 v_b = item >> 12;
     s2 v_c = ins->param[1];
 
     switch (number) {

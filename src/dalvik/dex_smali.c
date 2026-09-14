@@ -3,6 +3,7 @@
 #include "dex_meta_helper.h"
 #include "dex_class.h"
 #include "dex_method.h"
+#include "dalvik/dex_opcode_fields.h"
 
 static FILE* _smali_stream(FILE *out) {
     return out == NULL ? stdout : out;
@@ -266,19 +267,18 @@ static void smali_write_method(jd_meta_dex *dex,
             }
             case DEX_INS_INSTANCE_OF: { // instance-of
                 // instance-of vA, vB, type@CCCC
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 u2 type_index = code->insns[i+1];
-                dex_type_id *type_id = &dex->type_ids[type_index];
-                string type_name = dex->strings[type_id->descriptor_idx].data;
+                string type_name = dex_str_of_type_id(dex, type_index);
                 fprintf(_smali_stream(stream), "v%d, v%d, %s\n",
                        v_a, v_b, type_name);
                 break;
             }
             case DEX_INS_ARRAY_LENGTH: { // array-length
                 // array-length vA, vB
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 fprintf(_smali_stream(stream), "v%d, v%d\n", v_a, v_b);
                 break;
             }
@@ -293,12 +293,13 @@ static void smali_write_method(jd_meta_dex *dex,
             }
             case DEX_INS_NEW_ARRAY: { // new-array
                 // new-array vA, vB, type@CCCC
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 u2 type_index = code->insns[i+1];
+                string type_name = dex_str_of_type_id(dex, type_index);
                 fprintf(_smali_stream(stream),
-                        "v%d, v%d %d\n",
-                        v_a, v_b, type_index);
+                        "v%d, v%d, %s\n",
+                        v_a, v_b, type_name);
                 break;
             }
             case DEX_INS_FILLED_NEW_ARRAY: { // filled-new-array
@@ -438,12 +439,12 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_CMPG_DOUBLE: // cmpg-double
             case DEX_INS_CMP_LONG: { // cmpl-long
                 // cmpl-float vAA, vBB, vCC
-                u1 v_a = (*item >> 8);
+                u1 v_a = dex_field_aa(*item);
                 u2 second = code->insns[i+1];
-                u1 v_b = second >> 8;
-                u1 v_c = second & 0x0F;
+                u1 v_b = dex_field_23x_bb(second);
+                u1 v_c = dex_field_23x_cc(second);
                 fprintf(_smali_stream(stream),
-                        "v%d v%d v%d\n",
+                        "v%d, v%d, v%d\n",
                         v_a,
                         v_b,
                         v_c);
@@ -456,8 +457,8 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_IF_GT: // if-gt
             case DEX_INS_IF_LE: { // if-le
                 // if-eq vA, vB, +CCCC
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 s2 v_c = code->insns[i+1];
                 fprintf(_smali_stream(stream),
                         "v%d, v%d => %d\n",
@@ -502,12 +503,12 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_APUT_BYTE:
             case DEX_INS_APUT_CHAR:
             case DEX_INS_APUT_SHORT: {
-                u1 v_a = (*item >> 8);
+                u1 v_a = dex_field_aa(*item);
                 u2 second = code->insns[i+1];
-                u1 v_b = second >> 8;
-                u1 v_c = second & 0x0F;
+                u1 v_b = dex_field_23x_bb(second);
+                u1 v_c = dex_field_23x_cc(second);
                 fprintf(_smali_stream(stream),
-                        "v%d, v%d, %d\n",
+                        "v%d, v%d, v%d\n",
                         v_a,
                         v_b,
                         v_c);
@@ -742,8 +743,8 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_INT_TO_BYTE:
             case DEX_INS_INT_TO_CHAR:
             case DEX_INS_INT_TO_SHORT: {
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 fprintf(_smali_stream(stream), "v%d, v%d\n", v_a, v_b);
                 break;
             }
@@ -823,8 +824,8 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_DIV_DOUBLE_2ADDR:
             case DEX_INS_REM_DOUBLE_2ADDR: {
                 // 12x
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 fprintf(_smali_stream(stream), "v%d, v%d\n", v_a, v_b);
                 break;
             }
@@ -836,8 +837,8 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_AND_INT_LIT16:
             case DEX_INS_OR_INT_LIT16:
             case DEX_INS_XOR_INT_LIT16: {
-                u1 v_a = *item >> 12;
-                u1 v_b = (*item >> 8) & 0x0F;
+                u1 v_a = dex_field_a_nibble(*item);
+                u1 v_b = dex_field_b_nibble(*item);
                 s2 v_c = code->insns[i+1];
                 fprintf(_smali_stream(stream),
                         "v%d, v%d, %d\n",

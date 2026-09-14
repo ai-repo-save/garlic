@@ -144,7 +144,12 @@ static void create_method_defination_without_signature(jd_method *m,
 
 string create_method_defination(jd_method *m)
 {
-    str_list *list = str_list_init();
+    str_list *list;
+
+    if (method_is_clinit(m))
+        return str_create("static");
+
+    list = str_list_init();
     create_method_access_flag(m, list);
     method_sig *sig = NULL;
 

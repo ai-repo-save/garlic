@@ -753,6 +753,14 @@ static void write_default(FILE *stream, jsource_file *jf, jd_node *n)
     fprintf(stream, "%s}\n", ident);
 }
 
+static void write_plain_block(FILE *stream, jsource_file *jf, jd_node *n)
+{
+    string ident = get_node_ident(n);
+    fprintf(stream, "%s{\n", ident);
+    writter_for_class(jf, n);
+    fprintf(stream, "%s}\n", ident);
+}
+
 void writter_for_class(jsource_file *jf, jd_node *node)
 {
     if (node == NULL)
@@ -809,6 +817,10 @@ void writter_for_class(jsource_file *jf, jd_node *node)
                 break;
             case JD_NODE_SYNCHRONIZED:
                 write_synchronized(stream, jf, child);
+                break;
+            case JD_NODE_IF_TRUE:
+            case JD_NODE_IF_FALSE:
+                write_plain_block(stream, jf, child);
                 break;
             default:
                 write_default(stream, jf, child);
@@ -869,6 +881,10 @@ void writter_for_anonymous_class(jsource_file *jf, jd_node *node)
                 break;
             case JD_NODE_SYNCHRONIZED:
                 write_synchronized(stream, jf, child);
+                break;
+            case JD_NODE_IF_TRUE:
+            case JD_NODE_IF_FALSE:
+                write_plain_block(stream, jf, child);
                 break;
             default:
                 write_default(stream, jf, child);

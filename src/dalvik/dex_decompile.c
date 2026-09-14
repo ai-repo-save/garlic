@@ -20,6 +20,7 @@
 #include "dex_annotation.h"
 #include "dex_dump.h"
 #include "dex_smali.h"
+#include "dalvik/output_syntax.h"
 
 static int dex_progress_len = 0;
 
@@ -266,17 +267,38 @@ void dex_decompile_class(jd_dex *dex, dex_class_def *cf)
 
     jsource_file *jf = dex_class_inside(dex, cf, NULL);
     if (jf->parent == NULL) {
+        string path = NULL;
         writter_for_class(jf, NULL);
         fclose(jf->source);
+        if (dex->meta->source_dir != NULL && jf->pname != NULL && jf->sname != NULL)
+            path = str_create("%s/%s/%s.java", dex->meta->source_dir,
+                              jf->pname, jf->sname);
+        if (path != NULL)
+            jd_output_mark_syntax(path, 0);
     }
     mem_free_pool();
 }
 
 void dex_smali_class(jd_dex *dex, dex_class_def *cf)
 {
+    FILE *stream;
+    string desc;
+    string fname;
+    string sname;
+    string pname;
+    string path;
+
     mem_init_pool();
-    FILE *stream = dex_class_smali_save_dir(dex, cf);
+    stream = dex_class_smali_save_dir(dex, cf);
     dex_class_def_to_smali(dex->meta, cf, stream);
+    if (stream != NULL)
+        fclose(stream);
+    desc = dex_str_of_type_id(dex->meta, cf->class_idx);
+    fname = class_full_name(desc);
+    sname = class_simple_name_without_primitive(fname);
+    pname = class_package_name_of(fname);
+    path = str_create("%s/%s/%s.smali", dex->meta->source_dir, pname, sname);
+    jd_output_mark_syntax(path, 1);
     mem_free_pool();
 }
 
@@ -357,6 +379,8 @@ jd_dex* dex_init_without_thread(jd_meta_dex *meta)
 void dex_decompile_thread_task(jd_dex_task *task)
 {
     thread_local_data *tls = get_thread_local_data();
+    if (tls == NULL)
+        return;
     tls->pool = mem_create_pool();
 
     jd_dex *dex = task->dex;
@@ -366,6 +390,11 @@ void dex_decompile_thread_task(jd_dex_task *task)
     if (jf->parent == NULL) {
         writter_for_class(jf, NULL);
         fclose(jf->source);
+        if (dex->meta->source_dir != NULL && jf->pname != NULL && jf->sname != NULL) {
+            string path = str_create("%s/%s/%s.java", dex->meta->source_dir,
+                                     jf->pname, jf->sname);
+            jd_output_mark_syntax(path, 0);
+        }
     }
     mem_pool_free(tls->pool);
     tls->pool = NULL;
@@ -376,6 +405,8 @@ void dex_decompile_thread_task(jd_dex_task *task)
 void dex_smali_thread_task(jd_dex_task *task)
 {
     thread_local_data *tls = get_thread_local_data();
+    if (tls == NULL)
+        return;
     tls->pool = mem_create_pool();
 
     jd_dex *dex = task->dex;
@@ -387,6 +418,15 @@ void dex_smali_thread_task(jd_dex_task *task)
 
     if (stream != NULL)
         fclose(stream);
+    if (dex->meta->source_dir != NULL) {
+        string desc = dex_str_of_type_id(dex->meta, cf->class_idx);
+        string fname = class_full_name(desc);
+        string sname = class_simple_name_without_primitive(fname);
+        string pname = class_package_name_of(fname);
+        string path = str_create("%s/%s/%s.smali", dex->meta->source_dir,
+                                 pname, sname);
+        jd_output_mark_syntax(path, 1);
+    }
 
     mem_pool_free(tls->pool);
     tls->pool = NULL;
