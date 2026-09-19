@@ -290,3 +290,18 @@ endif ()
 
 add_executable(dex_format_decode_test tests/dex_format_decode_test.c)
 
+# Explicit local-toolchain regression; no SDK downloads or full-APK analysis.
+option(GARLIC_DEX_RENDERING_TEST "Enable the DEX Java rendering integration test" OFF)
+if (GARLIC_DEX_RENDERING_TEST)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Java REQUIRED COMPONENTS Runtime Development)
+    find_program(GARLIC_TEST_D8 NAMES d8 REQUIRED)
+    enable_testing()
+    add_test(NAME dex_rendering_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/dex_rendering_integration.py
+            --garlic $<TARGET_FILE:garlic>
+            --d8 ${GARLIC_TEST_D8}
+            --javac ${Java_JAVAC_EXECUTABLE}
+            --java ${Java_JAVA_EXECUTABLE})
+endif ()
+

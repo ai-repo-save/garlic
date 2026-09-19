@@ -2,6 +2,7 @@
 #include "decompiler/signature.h"
 #include "decompiler/method.h"
 #include "decompiler/expression_node.h"
+#include "parser/dex/dex.h"
 #include "common/str_tools.h"
 
 #include "libs/str/str.h"
@@ -350,7 +351,10 @@ static void class_methods_defination(jsource_file *jf)
 static void class_defination_with_signature(jsource_file *jf)
 {
     str_list *list = str_list_init();
-    jclass_file *jc = jf->jclass;
+    // DEX class definitions are not JVM class-file structures.
+    uint32_t flags = jf->type == JD_TYPE_DALVIK
+        ? ((dex_class_def *) jf->jclass)->access_flags
+        : be16toh(((jclass_file *) jf->jclass)->access_flags);
 
     create_class_access_flag(jf, list);
 
@@ -372,19 +376,16 @@ static void class_defination_with_signature(jsource_file *jf)
         str_concat(list, buf);
     }
 
-    // TODO:
-    if (cs != NULL) {
-        if (class_has_flag(jc, CLASS_ACC_ENUM)) {
-            if (cs->base_class->path->size > 1) {
-                str_concat(list, " extends ");
-                for (int i = 0; i < cs->base_class->path->size; ++i) {
-                    simple_class_type_sig *ss = lget_obj(bs->path, i);
-                    string sss = simple_class_signature_to_s(ss);
-                    str_concat(list, sss);
-                    if (i != cs->base_class->path->size - 1)
-                        str_concat(list, ", ");
-                }
-            }
+    // Enum's implicit java.lang.Enum parent is not legal in a Java extends
+    // clause. Ordinary classes must retain even a single-segment generic base.
+    if (bs != NULL && !(flags & CLASS_ACC_ENUM) &&
+        !STR_EQL(jf->super_cname, g_str_Object)) {
+        str_concat(list, " extends ");
+        for (int i = 0; i < bs->path->size; ++i) {
+            simple_class_type_sig *ss = lget_obj(bs->path, i);
+            str_concat(list, simple_class_signature_to_s(ss));
+            if (i != bs->path->size - 1)
+                str_concat(list, ".");
         }
     }
 

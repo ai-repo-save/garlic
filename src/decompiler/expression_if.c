@@ -34,6 +34,8 @@ void negative_if_expression(jd_method *m)
             jd_exp_single_operator *sop = make_obj(jd_exp_single_operator);
             sop->list = exp_list;
             sop->operator = JD_OP_LOGICAL_NOT;
+            condition->type = JD_EXPRESSION_SINGLE_OPERATOR;
+            condition->data = sop;
         }
         else if (condition->type == JD_EXPRESSION_SINGLE_OPERATOR) {
             jd_exp_single_operator *single_op = condition->data;
