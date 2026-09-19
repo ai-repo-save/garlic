@@ -4,6 +4,7 @@
 #include "dex_class.h"
 #include "dex_method.h"
 #include "dalvik/dex_opcode_fields.h"
+#include <inttypes.h>
 
 static FILE* _smali_stream(FILE *out) {
     return out == NULL ? stdout : out;
@@ -55,17 +56,6 @@ static void smali_instruction_header(encoded_method *m,
                                        int i,
                                        FILE *stream)
 {
-    if (opcode == DEX_INS_MOVE ||
-        opcode == DEX_INS_MOVE_FROM16 ||
-        opcode == DEX_INS_MOVE_16 ||
-        opcode == DEX_INS_MOVE_WIDE ||
-        opcode == DEX_INS_MOVE_WIDE_FROM16 ||
-        opcode == DEX_INS_MOVE_WIDE_16 ||
-        opcode == DEX_INS_MOVE_OBJECT ||
-        opcode == DEX_INS_MOVE_OBJECT_FROM16 ||
-        opcode == DEX_INS_MOVE_OBJECT_16)
-        return;
-
     fprintf(_smali_stream(stream), "\t%s ", dex_opcode_name(opcode));
 }
 
@@ -129,6 +119,30 @@ static void smali_write_method(jd_meta_dex *dex,
 
                     len = (size * element_size + 1) / 2 + 4;
                 }
+                else {
+                    fprintf(_smali_stream(stream), "\n");
+                }
+                break;
+            }
+            case DEX_INS_MOVE:
+            case DEX_INS_MOVE_WIDE:
+            case DEX_INS_MOVE_OBJECT: { // 12x: B|A|op
+                fprintf(_smali_stream(stream), "v%d, v%d\n",
+                        dex_field_a_nibble(*item), dex_field_b_nibble(*item));
+                break;
+            }
+            case DEX_INS_MOVE_FROM16:
+            case DEX_INS_MOVE_WIDE_FROM16:
+            case DEX_INS_MOVE_OBJECT_FROM16: { // 22x: AA|op BBBB
+                fprintf(_smali_stream(stream), "v%d, v%d\n",
+                        dex_field_aa(*item), code->insns[i+1]);
+                break;
+            }
+            case DEX_INS_MOVE_16:
+            case DEX_INS_MOVE_WIDE_16:
+            case DEX_INS_MOVE_OBJECT_16: { // 32x: 00|op AAAA BBBB
+                fprintf(_smali_stream(stream), "v%d, v%d\n",
+                        code->insns[i+1], code->insns[i+2]);
                 break;
             }
             case DEX_INS_MOVE_RESULT: // move-result
@@ -177,16 +191,15 @@ static void smali_write_method(jd_meta_dex *dex,
                 u1 v_a = (*item >> 8);
                 u4 low = code->insns[i+1];
                 u4 high = code->insns[i+2];
-                u8 v_b = (u8)high << 32 | low;
-                fprintf(_smali_stream(stream), "v%d, %lu\n", v_a, v_b);
+                s4 v_b = (s4)((high << 16) | low);
+                fprintf(_smali_stream(stream), "v%d, %" PRId32 "\n", v_a, v_b);
                 break;
             }
             case DEX_INS_CONST_HIGH16: { // const/high16
                 // const/high16 vAA, #+BBBB0000
                 u1 v_a = (*item >> 8);
-                s2 v_b = code->insns[i + 1];
-                v_b = v_b << 16;
-                fprintf(_smali_stream(stream), "v%d, %d\n", v_a, v_b);
+                s4 v_b = (s4)((u4)code->insns[i+1] << 16);
+                fprintf(_smali_stream(stream), "v%d, %" PRId32 "\n", v_a, v_b);
                 break;
             }
             case DEX_INS_CONST_WIDE_16: { // const-wide/16
@@ -199,29 +212,27 @@ static void smali_write_method(jd_meta_dex *dex,
             case DEX_INS_CONST_WIDE_32: { // const-wide/32
                 // const-wide/32 vAA, #+BBBBBBBB
                 u1 v_a = (*item >> 8);
-                s4 b1 = code->insns[i+1];
-                s4 b2 = code->insns[i+2];
-                s8 v_b = (s8)b1 << 32 | b2;
-                fprintf(_smali_stream(stream), "v%d, %ld\n", v_a, v_b);
+                u4 bits = (u4)code->insns[i+1] | ((u4)code->insns[i+2] << 16);
+                s8 v_b = (s4)bits; // 31i sign-extends the 32-bit literal to 64 bits.
+                fprintf(_smali_stream(stream), "v%d, %" PRId64 "\n", v_a, v_b);
                 break;
             }
             case DEX_INS_CONST_WIDE: { // const-wide vAA, #+BBBBBBBBBBBBBBBB
                 // const-wide vAA, #+BBBBBBBBBBBBBBBB
                 u1 v_a = (*item >> 8);
-                s4 b1 = code->insns[i+1];
-                s4 b2 = code->insns[i+2];
-                s4 b3 = code->insns[i+3];
-                s4 b4 = code->insns[i+4];
-                s8 v_b = (s8)b1 << 48 | (s8)b2 << 32 | (s8)b3 << 16 | b4;
-                fprintf(_smali_stream(stream), "v%d, %ld\n", v_a, v_b);
+                u8 bits = (u8)code->insns[i+1] |
+                          ((u8)code->insns[i+2] << 16) |
+                          ((u8)code->insns[i+3] << 32) |
+                          ((u8)code->insns[i+4] << 48);
+                s8 v_b = (s8)bits;
+                fprintf(_smali_stream(stream), "v%d, %" PRId64 "\n", v_a, v_b);
                 break;
             }
             case DEX_INS_CONST_WIDE_HIGH16: { // const-wide/high16
                 // const-wide/high16 vAA, #+BBBB000000000000
                 u1 v_a = (*item >> 8);
-                s2 b1 = code->insns[i+1];
-                s8 v_b = (s8)b1 << 48;
-                fprintf(_smali_stream(stream), "v%d, %ld\n", v_a, v_b);
+                s8 v_b = (s8)((u8)code->insns[i+1] << 48);
+                fprintf(_smali_stream(stream), "v%d, %" PRId64 "\n", v_a, v_b);
                 break;
             }
             case DEX_INS_CONST_STRING: { // const-string
