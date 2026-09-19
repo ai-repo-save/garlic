@@ -388,11 +388,10 @@ static void smali_write_method(jd_meta_dex *dex,
                 u1 v_a = *item >> 8;
                 u2 counter = code->insns[i+2];
                 u2 type_index = code->insns[i+1];
-                u2 count = counter + v_a - 1;
-
-                fprintf(_smali_stream(stream), "{\n");
-                for (int j = counter; j < count; ++j)
-                    fprintf(_smali_stream(stream), "v%d, ", j);
+                // 3rc AA is a count, not an inclusive end-register offset.
+                fprintf(_smali_stream(stream), "{");
+                for (int j = 0; j < v_a; ++j)
+                    fprintf(_smali_stream(stream), "%sv%d", j == 0 ? "" : ", ", counter + j);
                 fprintf(_smali_stream(stream), "} @%d\n", type_index);
                 break;
             }

@@ -28,7 +28,10 @@ units and reads it through the formal MCP `smali` tool. It checks all nine move
 opcodes (12x, 22x, 32x) and signed literals for `const`, `const/high16`,
 `const-wide/32`, `const-wide`, and `const-wide/high16`, including minimum/maximum
 values and asymmetric halfwords. A plain NOP must occupy its own line before the
-following instruction. The independent expectations follow Android's
+following instruction. `filled-new-array/range` cases check zero, one, and three
+registers, including a range ending at the method's highest register. The 3rc
+count controls the exact register list; each instruction occupies one line.
+The independent expectations follow Android's
 [DEX instruction formats](https://source.android.com/docs/core/runtime/instruction-formats)
 and [Dalvik bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode).
 The fixture exercises disassembly; it does not execute or verify register types.
