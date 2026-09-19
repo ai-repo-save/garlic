@@ -300,9 +300,13 @@ static void dispatch(jd_mcp_server *server, cJSON *msg)
                               "tools/call requires 'name' (string)");
             return;
         }
-        mcp_handle_tools_call(server, id,
-                              name->valuestring,
-                              args ? args : cJSON_CreateObject());
+        jd_mcp_server request = *server;
+        request.pool = mem_create_pool();
+        cJSON *default_args = args ? NULL : cJSON_CreateObject();
+        mcp_handle_tools_call(&request, id, name->valuestring,
+                              args ? args : default_args);
+        cJSON_Delete(default_args);
+        mem_pool_free(request.pool);
     }
     else {
         jd_mcp_send_error(id, JD_MCP_ERROR_METHOD_NOT_FOUND, "Method not found");
@@ -351,6 +355,6 @@ void jd_mcp_server_run(jd_mcp_server *server)
 
 void jd_mcp_server_cleanup(jd_mcp_server *server)
 {
-    (void)server;
     jd_mcp_log("cleanup");
+    mem_pool_free(server->pool);
 }

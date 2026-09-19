@@ -290,6 +290,15 @@ endif ()
 
 add_executable(dex_format_decode_test tests/dex_format_decode_test.c)
 
+option(GARLIC_MCP_LIFETIME_TEST "Enable the MCP request lifetime integration test" OFF)
+if (GARLIC_MCP_LIFETIME_TEST)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(NAME mcp_request_lifetime
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/mcp_request_lifetime_test.py
+            $<TARGET_FILE:garlic>)
+endif ()
+
 # Explicit local-toolchain regression; no SDK downloads or full-APK analysis.
 option(GARLIC_DEX_RENDERING_TEST "Enable the DEX Java rendering integration test" OFF)
 if (GARLIC_DEX_RENDERING_TEST)
