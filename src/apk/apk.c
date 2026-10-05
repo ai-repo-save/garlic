@@ -10,6 +10,9 @@
 #include "dalvik/output_syntax.h"
 #include "dalvik/dex_meta_helper.h"
 #include "decompiler/klass.h"
+#ifdef _WIN32
+#include "libs/hashmap/hashmap_tools.h"
+#endif
 
 static int apk_progress_len = 0;
 
@@ -56,7 +59,7 @@ void apk_decompile_thread_task(jd_dex_task *task)
         fclose(jf->source);
         if (dex->meta->source_dir != NULL && jf->pname != NULL && jf->sname != NULL) {
             string path = str_create("%s/%s/%s.java", dex->meta->source_dir,
-                                     jf->pname, jf->sname);
+                                     jf->pname, cf->output_basename == NULL ? jf->sname : cf->output_basename);
             jd_output_mark_syntax(path, 0);
         }
     }
@@ -90,7 +93,7 @@ void apk_smali_thread_task(jd_dex_task *task)
         string sname = class_simple_name_without_primitive(fname);
         string pname = class_package_name_of(fname);
         string path = str_create("%s/%s/%s.smali", dex->meta->source_dir,
-                                 pname, sname);
+                                 pname, cf->output_basename == NULL ? sname : cf->output_basename);
         jd_output_mark_syntax(path, 1);
     }
 
@@ -140,7 +143,9 @@ static void apk_process_dex_from_zip(jd_apk *apk, struct zip_t *zip)
         zip_entry_close(zip);
 
         jd_meta_dex *meta = parse_dex_from_buffer(buf, buf_size);
-        jd_dex *dex = dex_init_without_thread(meta);
+        jd_dex *dex = dex_init_without_thread(meta,
+                                              apk->output_path_counts,
+                                              &apk->output_path_counts_lock);
         meta->source_dir = apk->save_dir;
 
         for (int j = 0; j < meta->header->class_defs_size; ++j) {
@@ -223,6 +228,9 @@ static void apk_release(jd_apk *apk)
     if (apk->threadpool)
         threadpool_destroy(apk->threadpool, 1);
 
+#ifdef _WIN32
+    pthread_mutex_destroy(&apk->output_path_counts_lock);
+#endif
     mem_pool_free(apk->pool);
     mem_free_pool();
 }
@@ -241,12 +249,13 @@ void apk_decompile_analyse(string path,
     apk->save_dir = save_dir;
     apk->thread_num = thread_num;
     apk->type = type;
+    apk->output_path_counts = NULL;
+#ifdef _WIN32
+    apk->output_path_counts = hashmap_init_in(pool, s2i_cmp, 0);
+    pthread_mutex_init(&apk->output_path_counts_lock, NULL);
+#endif
 
-    if (thread_num > 1) {
-        apk->threadpool = threadpool_create_in(apk->pool, thread_num, 0);
-    } else {
-        apk->threadpool = NULL;
-    }
+    apk->threadpool = threadpool_create_in(apk->pool, thread_num, 0);
 
     apk_decompile_task_start(apk);
 
