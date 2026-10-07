@@ -13,4 +13,6 @@ int dex_smali_write_class_from_path(const char *path,
                                     const char *class_name,
                                     FILE *stream);
 
+int dex_smali_class_to_dir(string source_path, string class_desc, string out_dir);
+
 #endif //GARLIC_DEX_SMALI_H

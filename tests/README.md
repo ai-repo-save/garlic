@@ -18,8 +18,8 @@ ctest --test-dir build -R '^dex_rendering_integration$' --output-on-failure
 ```
 
 The option defaults to OFF and never downloads a JDK or SDK. The standalone
-Python runner's `--help` describes its paths. The existing operand decoder test
-remains available as `build/dex_format_decode_test`.
+Python runner's `--help` describes its paths. The decoder helpers and their
+standalone test were removed when the upstream decoder replaced them.
 
 ## Raw DEX smali operands
 
@@ -31,6 +31,8 @@ values and asymmetric halfwords. A plain NOP must occupy its own line before the
 following instruction. `filled-new-array/range` cases check zero, one, and three
 registers, including a range ending at the method's highest register. The 3rc
 count controls the exact register list; each instruction occupies one line.
+The comparison decodes hexadecimal literals and register ranges to values,
+so it checks instruction semantics rather than the upstream text formatting.
 The independent expectations follow Android's
 [DEX instruction formats](https://source.android.com/docs/core/runtime/instruction-formats)
 and [Dalvik bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode).

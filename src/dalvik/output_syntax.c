@@ -1,4 +1,6 @@
 #include "dalvik/output_syntax.h"
+#include "common/output_path.h"
+#include "common/str_tools.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -98,6 +100,16 @@ static int prepend_header(const char *path, const char *reason)
     fclose(f);
     free(src);
     return 0;
+}
+
+void jd_output_mark_java(const char *source_dir, const char *package_name,
+                         const char *class_name)
+{
+    if (source_dir == NULL || package_name == NULL || class_name == NULL)
+        return;
+    char *dir = str_create("%s/%s", source_dir, package_name);
+    char *name = output_path_resolve(dir, str_create("%s.java", class_name));
+    jd_output_mark_syntax(str_create("%s/%s", dir, name), 0);
 }
 
 void jd_output_mark_syntax(const char *path, int is_smali)

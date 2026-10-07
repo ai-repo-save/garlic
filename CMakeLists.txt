@@ -55,6 +55,8 @@ include_directories(libs/include)
 include_directories(src/ai)
 include_directories(src/jar)
 include_directories(src/dalvik)
+include_directories(src/decompiler)
+include_directories(src/decompiler/transformer)
 include_directories(src)
 
 aux_source_directory(src/common COMMON)
@@ -287,8 +289,6 @@ if (RELEASE)
     endif ()
 
 endif ()
-
-add_executable(dex_format_decode_test tests/dex_format_decode_test.c)
 
 option(GARLIC_MCP_LIFETIME_TEST "Enable the MCP request lifetime integration test" OFF)
 if (GARLIC_MCP_LIFETIME_TEST)

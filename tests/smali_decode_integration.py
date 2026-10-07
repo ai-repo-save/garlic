@@ -8,6 +8,7 @@ This fixture is disassembled, not executed or used to assert VM type verificatio
 
 import hashlib
 import json
+import re
 import struct
 import subprocess
 import sys
@@ -178,9 +179,9 @@ EXPECTED = [
     "const-wide/high16 v6, -9223372036854775808",
     "const-wide/high16 v8, -281474976710656",
     "const-wide/high16 v10, 0",
-    "filled-new-array/range {} @3",
-    "filled-new-array/range {v65534} @3",
-    "filled-new-array/range {v65532, v65533, v65534} @3",
+    "filled-new-array/range {}, [I",
+    "filled-new-array/range {v65534}, [I",
+    "filled-new-array/range {v65532, v65533, v65534}, [I",
     "return-void",
 ]
 
@@ -272,6 +273,28 @@ def dex_fixture():
     return data
 
 
+def decoded_instructions(text):
+    """Compare operand values, not indentation, hex spelling or range notation."""
+    instructions = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("."):
+            continue
+        opcode, _, operands = line.partition(" ")
+        if opcode.startswith("const"):
+            register, literal = operands.split(", ")
+            line = f"{opcode} {register}, {int(literal.removesuffix('L'), 0)}"
+        elif opcode == "filled-new-array/range":
+            match = re.fullmatch(r"\{\s*(?:v(\d+) \.\. v(\d+))?\s*\}, (\S+)", operands)
+            assert match is not None, line
+            start, end, descriptor = match.groups()
+            registers = [] if start is None else range(int(start), int(end) + 1)
+            values = ", ".join(f"v{register}" for register in registers)
+            line = f"{opcode} {{{values}}}, {descriptor}"
+        instructions.append(line)
+    return instructions
+
+
 def main():
     binary = str(Path(sys.argv[1]).resolve())
     with tempfile.TemporaryDirectory(prefix="garlic-smali-decode-") as directory:
@@ -299,11 +322,7 @@ def main():
         reply = json.loads(result.stdout)
         text = reply["result"]["content"][0]["text"]
         # Compare every instruction, not just substring matches or output size.
-        instructions = [
-            line.strip()
-            for line in text.splitlines()
-            if line.startswith("\t") and not line.lstrip().startswith(".")
-        ]
+        instructions = decoded_instructions(text)
         assert instructions == EXPECTED, (instructions, EXPECTED, text)
     print(
         "Smali raw DEX regression passed: 9 moves, 30 signed constants, NOP, 3 array ranges and alignment"
