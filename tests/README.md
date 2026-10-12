@@ -38,6 +38,10 @@ The independent expectations follow Android's
 and [Dalvik bytecode](https://source.android.com/docs/core/runtime/dalvik-bytecode).
 The fixture exercises disassembly; it does not execute or verify register types.
 Branch labels, exception metadata, and other opcodes require separate validation.
+`smali_payload_integration.py` uses the same option and checks two hand-encoded
+edge cases: a packed-switch payload shared by two instructions must keep each
+instruction's relative targets, and an array payload with element width 0 must
+be rendered as an empty `.array-data 1` block.
 
 ```sh
 cmake -S . -B build -DGARLIC_SMALI_DECODE_TEST=ON

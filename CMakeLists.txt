@@ -313,6 +313,9 @@ if (GARLIC_SMALI_DECODE_TEST)
     add_test(NAME smali_decode_integration
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/smali_decode_integration.py
             $<TARGET_FILE:garlic>)
+    add_test(NAME smali_payload_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/smali_payload_integration.py
+            $<TARGET_FILE:garlic>)
 endif ()
 
 # Explicit local-toolchain regression; no SDK downloads or full-APK analysis.

@@ -261,6 +261,7 @@ typedef struct {
     u2  size;        // element count
     u4  first_key;   // packed-switch only
     u2  elem_width;  // fill-array-data only
+    char label[SMALI_LABEL_MAX];
 } smali_payload;
 
 typedef struct {
@@ -302,6 +303,19 @@ static smali_payload* smali_payloads_find(smali_payload_table *t, u4 off)
     return NULL;
 }
 
+static const char* smali_payload_label_for(smali_payload_table *t,
+                                           u4 insn_off, u4 payload_off)
+{
+    if (t == NULL)
+        return NULL;
+    for (int i = 0; i < t->count; ++i) {
+        if (t->items[i].base == insn_off && t->items[i].off == payload_off)
+            return t->items[i].label;
+    }
+    smali_payload *shared = smali_payloads_find(t, payload_off);
+    return shared == NULL ? NULL : shared->label;
+}
+
 typedef struct {
     smali_label_table   *labels;
     smali_payload_table *payloads;
@@ -336,25 +350,34 @@ static int smali_payload_len(const dex_code_item *code, int i)
     return 4 + (int) ((size * element_width + 1) / 2);
 }
 
+static bool smali_switch_payload(u2 ident)
+{
+    return ident == 0x0100 || ident == 0x0200;
+}
+
 static void smali_scan_payload(smali_scan *scan, const dex_code_item *code,
                                int i, int payload_off, u4 base)
 {
+    (void) i;
     if (payload_off < 0 || payload_off >= (int) code->insns_size)
         return;
     if (!smali_is_payload(code, payload_off))
         return;
-    if (smali_payloads_find(scan->payloads, (u4) payload_off) != NULL)
+    u2 ident = code->insns[payload_off];
+    /* Switch targets are relative to each switch instruction, so one DEX
+     * payload referenced twice needs two label sets. Array data is absolute. */
+    if (!smali_switch_payload(ident) &&
+        smali_payloads_find(scan->payloads, (u4) payload_off) != NULL)
         return;
 
     smali_payload *p = smali_payloads_add(scan->payloads, (u4) payload_off);
     p->base = base;
-    p->ident = code->insns[payload_off];
+    p->ident = ident;
     p->size = code->insns[payload_off + 1];
 
     if (p->ident == 0x0100) {
         p->first_key = smali_u32_at(code, payload_off + 2);
-        smali_labels_intern(scan->labels, (u4) payload_off,
-                            "pswitch_data", &scan->n_pswitch_data);
+        snprintf(p->label, SMALI_LABEL_MAX, "pswitch_data_%d", scan->n_pswitch_data++);
         for (int j = 0; j < p->size; ++j) {
             u4 rel = smali_u32_at(code, payload_off + 4 + j * 2);
             smali_labels_intern(scan->labels, base + (s4) rel,
@@ -362,8 +385,7 @@ static void smali_scan_payload(smali_scan *scan, const dex_code_item *code,
         }
     }
     else if (p->ident == 0x0200) {
-        smali_labels_intern(scan->labels, (u4) payload_off,
-                            "sswitch_data", &scan->n_sswitch_data);
+        snprintf(p->label, SMALI_LABEL_MAX, "sswitch_data_%d", scan->n_sswitch_data++);
         for (int j = 0; j < p->size; ++j) {
             u4 rel = smali_u32_at(code, payload_off + 2 + p->size * 2 + j * 2);
             smali_labels_intern(scan->labels, base + (s4) rel,
@@ -372,8 +394,9 @@ static void smali_scan_payload(smali_scan *scan, const dex_code_item *code,
     }
     else {
         p->elem_width = code->insns[payload_off + 1];
-        smali_labels_intern(scan->labels, (u4) payload_off,
-                            "array", &scan->n_array);
+        const char *label = smali_labels_intern(scan->labels, (u4) payload_off,
+                                                "array", &scan->n_array);
+        snprintf(p->label, SMALI_LABEL_MAX, "%s", label);
     }
 }
 
@@ -438,6 +461,8 @@ static void smali_scan_code(const dex_code_item *code, smali_scan *scan)
         u1 op = unit & 0xFF;
 
         if (smali_is_payload(code, i)) {
+            if (code->insns[i] == 0x0300)
+                smali_scan_payload(scan, code, i, i, (u4) i);
             i += smali_payload_len(code, i);
             continue;
         }
@@ -482,7 +507,8 @@ static void smali_scan_code(const dex_code_item *code, smali_scan *scan)
 
 static void smali_write_operands(FILE *stream, jd_meta_dex *dex,
                                  const dex_code_item *code, int i,
-                                 smali_label_table *labels)
+                                 smali_label_table *labels,
+                                 smali_payload_table *payloads)
 {
     u2 unit = code->insns[i];
     u1 op = unit & 0xFF;
@@ -592,7 +618,10 @@ static void smali_write_operands(FILE *stream, jd_meta_dex *dex,
         }
 
         case kFmt31t: {                     // switch / fill-array-data vAA, +BBBBBBBB
-            const char *label = smali_labels_find(labels, (u4) smali_payload_target(code, i));
+            u4 payload_off = (u4) smali_payload_target(code, i);
+            const char *label = smali_payload_label_for(payloads, (u4) i, payload_off);
+            if (label == NULL)
+                label = smali_labels_find(labels, payload_off);
             fprintf(stream, " v%d, :%s", unit >> 8, label ? label : "unknown");
             break;
         }
@@ -687,7 +716,9 @@ static void smali_write_operands(FILE *stream, jd_meta_dex *dex,
 }
 
 static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code,
-                                     smali_label_table *labels, FILE *stream)
+                                     smali_label_table *labels,
+                                     smali_payload_table *payloads,
+                                     FILE *stream)
 {
     int i = 0;
     while (i < (int) code->insns_size) {
@@ -704,7 +735,7 @@ static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code
             fprintf(stream, "  :%s\n", label);
 
         fprintf(stream, "    %s", dex_opcode_name(op));
-        smali_write_operands(stream, dex, code, i, labels);
+        smali_write_operands(stream, dex, code, i, labels, payloads);
         fputc('\n', stream);
 
         int len = dex_opcode_len(op);
@@ -725,11 +756,10 @@ static void smali_write_payloads(jd_meta_dex *dex, const dex_code_item *code,
 
     for (int i = 0; i < table->count; ++i) {
         smali_payload *p = &table->items[i];
-        const char *label = smali_labels_find(scan->labels, p->off);
-        if (label == NULL)
+        if (p->label[0] == '\0')
             continue;
 
-        fprintf(stream, "\n  :%s\n", label);
+        fprintf(stream, "\n  :%s\n", p->label);
 
         if (p->ident == 0x0100) {
             fputs("  .packed-switch ", stream);
@@ -757,9 +787,11 @@ static void smali_write_payloads(jd_meta_dex *dex, const dex_code_item *code,
             fprintf(stream, "  .end sparse-switch\n");
         }
         else {
-            u2 width = p->elem_width;
+            u2 raw_width = code->insns[p->off + 1];
+            /* A zero width cannot be represented; baksmali renders it as an empty width-1 payload. */
+            u2 width = raw_width == 0 ? 1 : raw_width;
             const u1 *data = (const u1 *) (code->insns + p->off + 4);
-            u4 size = smali_u32_at(code, p->off + 2);
+            u4 size = raw_width == 0 ? 0 : smali_u32_at(code, p->off + 2);
 
             fprintf(stream, "  .array-data %d\n", width);
             for (u4 j = 0; j < size; ++j) {
@@ -903,7 +935,8 @@ static void smali_write_method(jd_meta_dex *dex,
         smali_scan_code(code, &scan);
         smali_write_catches(dex, code, scan.labels, _smali_stream(stream));
         fprintf(_smali_stream(stream), "  .registers %d\n", code->registers_size);
-        smali_write_instructions(dex, code, scan.labels, _smali_stream(stream));
+        smali_write_instructions(dex, code, scan.labels, scan.payloads,
+                                 _smali_stream(stream));
         smali_write_payloads(dex, code, &scan, _smali_stream(stream));
     }
     fprintf(_smali_stream(stream), ".end method\n\n");
