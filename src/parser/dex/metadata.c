@@ -281,6 +281,82 @@ static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
     }
 }
 
+static encoded_array *parse_dex_encoded_array(jd_meta_dex *dex)
+{
+    mem_pool *pool = dex->pool;
+    encoded_array *array = make_obj_in(encoded_array, pool);
+    array->size = (u4) read_unsigned_leb128(dex);
+    if (array->size == 0) {
+        array->values = NULL;
+        return array;
+    }
+    array->values = make_obj_arr_in(encoded_value, array->size, pool);
+    for (u4 i = 0; i < array->size; ++i)
+        parse_dex_encoded_value(dex, &array->values[i]);
+    return array;
+}
+
+static bool dex_map_find(jd_meta_dex *dex, u2 want, u4 *size, u4 *off)
+{
+    if (dex->header->map_off == 0)
+        return false;
+    setup_current_offset(dex, dex->header->map_off);
+    u4 count = 0;
+    jdex_read4(dex, &count);
+    for (u4 i = 0; i < count; ++i) {
+        u2 type = 0, unused = 0;
+        u4 item_size = 0, item_off = 0;
+        jdex_read2(dex, &type);
+        jdex_read2(dex, &unused);
+        jdex_read4(dex, &item_size);
+        jdex_read4(dex, &item_off);
+        if (type == want) {
+            *size = item_size;
+            *off = item_off;
+            return true;
+        }
+    }
+    return false;
+}
+
+static void parse_dex_method_handles(jd_meta_dex *dex)
+{
+    dex->method_handles = NULL;
+    dex->method_handles_size = 0;
+    u4 size = 0, off = 0;
+    if (!dex_map_find(dex, kDexTypeMethodHandleItem, &size, &off) || size == 0)
+        return;
+    dex->method_handles = make_obj_arr_in(dex_method_handle_item, size, dex->pool);
+    dex->method_handles_size = size;
+    setup_current_offset(dex, off);
+    for (u4 i = 0; i < size; ++i) {
+        dex_method_handle_item *handle = &dex->method_handles[i];
+        jdex_read2(dex, &handle->method_handle_type);
+        jdex_read2(dex, &handle->reserved1);
+        jdex_read2(dex, &handle->field_or_method_idx);
+        jdex_read2(dex, &handle->reserved2);
+    }
+}
+
+static void parse_dex_call_sites(jd_meta_dex *dex)
+{
+    dex->call_sites = NULL;
+    dex->call_sites_size = 0;
+    u4 size = 0, off = 0;
+    if (!dex_map_find(dex, kDexTypeCallSiteIdItem, &size, &off) || size == 0)
+        return;
+    dex->call_sites = make_obj_arr_in(encoded_array, size, dex->pool);
+    dex->call_sites_size = size;
+    for (u4 i = 0; i < size; ++i) {
+        setup_current_offset(dex, off + i * 4);
+        u4 site_off = 0;
+        jdex_read4(dex, &site_off);
+        setup_current_offset(dex, site_off);
+        encoded_array *site = parse_dex_encoded_array(dex);
+        dex->call_sites[i] = *site;
+    }
+}
+
 static void parse_dex_annotation_off_item(jd_meta_dex *dex,
                                           annotation_off_item *off_item)
 {
@@ -859,6 +935,10 @@ static void parse_dex_class_defs(jd_meta_dex *dex)
         parse_dex_class_interfaces(dex, class_def);
         parse_dex_class_defs_anos(dex, class_def);
         parse_dex_class_data_items(dex, class_def);
+        if (class_def->static_values_off != 0) {
+            setup_current_offset(dex, class_def->static_values_off);
+            class_def->static_values = parse_dex_encoded_array(dex);
+        }
 
         if (dex_class_is_anonymous_class(dex, class_def))
             class_def->is_anonymous = true;
@@ -931,6 +1011,10 @@ jd_meta_dex* parse_dex_file(string path)
 
     parse_dex_class_defs(dex);
 
+    parse_dex_method_handles(dex);
+
+    parse_dex_call_sites(dex);
+
     return dex;
 }
 
@@ -964,6 +1048,10 @@ jd_meta_dex* parse_dex_from_buffer(char *buffer, size_t size)
     parse_dex_method_ids(meta);
 
     parse_dex_class_defs(meta);
+
+    parse_dex_method_handles(meta);
+
+    parse_dex_call_sites(meta);
 
     return meta;
 }

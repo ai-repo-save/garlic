@@ -55,8 +55,7 @@ void dex_class_access_flag_with_flags(u4 flags, str_list *list)
 {
     CONCAT_ACCESS_FLAG(flags, ACC_DEX_PUBLIC, list, "public ")
     CONCAT_ACCESS_FLAG(flags, ACC_DEX_FINAL, list, "final ")
-    if (!access_flags_contains(flags, ACC_DEX_INTERFACE))
-        CONCAT_ACCESS_FLAG(flags, ACC_DEX_ABSTRACT, list, "abstract ")
+    CONCAT_ACCESS_FLAG(flags, ACC_DEX_ABSTRACT, list, "abstract ")
     CONCAT_ACCESS_FLAG(flags, ACC_DEX_SYNTHETIC, list, "synthetic ")
     if (access_flags_contains(flags, ACC_DEX_INTERFACE))
         str_concat(list, "interface ");

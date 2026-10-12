@@ -185,6 +185,170 @@ static smali_ref_kind smali_ref_of(u1 op)
     return REF_NONE;
 }
 
+static u8 smali_le_unsigned(const u1 *bytes, int len)
+{
+    u8 value = 0;
+    for (int i = 0; i < len && i < 8; ++i)
+        value |= (u8) bytes[i] << (8 * i);
+    return value;
+}
+
+static s8 smali_le_signed(const u1 *bytes, int len)
+{
+    s8 value = (s8) smali_le_unsigned(bytes, len);
+    if (len > 0 && len < 8) {
+        int shift = 64 - len * 8;
+        value = (value << shift) >> shift;
+    }
+    return value;
+}
+
+static void smali_write_method_handle(FILE *stream, jd_meta_dex *dex, u4 idx);
+static void smali_write_encoded_value(FILE *stream, jd_meta_dex *dex,
+                                      encoded_value *value);
+
+static void smali_write_encoded_value(FILE *stream, jd_meta_dex *dex,
+                                      encoded_value *value)
+{
+    switch (value->value_type) {
+        case kDexAnnotationBoolean:
+            fputs(value->value_arg ? "true" : "false", stream);
+            break;
+        case kDexAnnotationByte:
+        case kDexAnnotationShort:
+        case kDexAnnotationChar:
+        case kDexAnnotationInt:
+            smali_int(stream, (s4) smali_le_signed(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationLong:
+            smali_long(stream, smali_le_signed(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationFloat: {
+            u4 bits = (u4) smali_le_unsigned(value->value, (int) value->value_length);
+            float number = 0;
+            memcpy(&number, &bits, sizeof(number));
+            char text[64];
+            snprintf(text, sizeof(text), "%.9g", number);
+            fputs(text, stream);
+            if (strchr(text, '.') == NULL && strchr(text, 'e') == NULL && strchr(text, 'E') == NULL)
+                fputs(".0", stream);
+            fputc('f', stream);
+            break;
+        }
+        case kDexAnnotationDouble: {
+            u8 bits = smali_le_unsigned(value->value, (int) value->value_length);
+            double number = 0;
+            memcpy(&number, &bits, sizeof(number));
+            char text[64];
+            snprintf(text, sizeof(text), "%.17g", number);
+            fputs(text, stream);
+            if (strchr(text, '.') == NULL && strchr(text, 'e') == NULL && strchr(text, 'E') == NULL)
+                fputs(".0", stream);
+            break;
+        }
+        case kDexAnnotationString:
+            smali_string(stream, dex_str_of_idx(dex, (u4) smali_le_unsigned(value->value, (int) value->value_length)));
+            break;
+        case kDexAnnotationType:
+            smali_type_ref(stream, dex, (u4) smali_le_unsigned(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationField:
+        case kDexAnnotationEnum:
+            smali_field_ref(stream, dex, (u4) smali_le_unsigned(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationMethod:
+            smali_method_ref(stream, dex, (u4) smali_le_unsigned(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationMethodType:
+            smali_proto(stream, dex, (u4) smali_le_unsigned(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationMethodHandle:
+            smali_write_method_handle(stream, dex, (u4) smali_le_unsigned(value->value, (int) value->value_length));
+            break;
+        case kDexAnnotationNull:
+            fputs("null", stream);
+            break;
+        case kDexAnnotationArray: {
+            encoded_array *array = (encoded_array *) value->value;
+            fputc('{', stream);
+            for (u4 i = 0; array != NULL && i < array->size; ++i) {
+                if (i > 0)
+                    fputs(", ", stream);
+                smali_write_encoded_value(stream, dex, &array->values[i]);
+            }
+            fputc('}', stream);
+            break;
+        }
+        default:
+            fprintf(stream, "encoded_value@0x%x", value->value_type);
+            break;
+    }
+}
+
+static const char *smali_handle_kind(u2 type)
+{
+    switch (type) {
+        case STATIC_PUT: return "static-put";
+        case STATIC_GET: return "static-get";
+        case INSTANCE_PUT: return "instance-put";
+        case INSTANCE_GET: return "instance-get";
+        case INVOKE_STATIC: return "invoke-static";
+        case INVOKE_INSTANCE: return "invoke-instance";
+        case INVOKE_CONSTRUCTOR: return "invoke-constructor";
+        case INVOKE_DIRECT: return "invoke-direct";
+        case INVOKE_INTERFACE: return "invoke-interface";
+        default: return NULL;
+    }
+}
+
+static void smali_write_method_handle(FILE *stream, jd_meta_dex *dex, u4 idx)
+{
+    if (dex->method_handles == NULL || idx >= dex->method_handles_size) {
+        fprintf(stream, "method_handle@0x%x", idx);
+        return;
+    }
+    dex_method_handle_item *handle = &dex->method_handles[idx];
+    const char *kind = smali_handle_kind(handle->method_handle_type);
+    if (kind == NULL) {
+        fprintf(stream, "method_handle@0x%x", idx);
+        return;
+    }
+    fprintf(stream, "%s@", kind);
+    if (handle->method_handle_type <= INSTANCE_GET)
+        smali_field_ref(stream, dex, handle->field_or_method_idx);
+    else
+        smali_method_ref(stream, dex, handle->field_or_method_idx);
+}
+
+static void smali_write_call_site(FILE *stream, jd_meta_dex *dex, u4 idx)
+{
+    if (dex->call_sites == NULL || idx >= dex->call_sites_size) {
+        fprintf(stream, "call_site@0x%x", idx);
+        return;
+    }
+    encoded_array *site = &dex->call_sites[idx];
+    fprintf(stream, "call_site_%u(", idx);
+    for (u4 i = 1; i < site->size; ++i) {
+        if (i > 1)
+            fputs(", ", stream);
+        smali_write_encoded_value(stream, dex, &site->values[i]);
+    }
+    fputs(")@", stream);
+    if (site->size == 0)
+        return;
+    encoded_value *bootstrap = &site->values[0];
+    if (bootstrap->value_type == kDexAnnotationMethodHandle) {
+        u4 handle_idx = (u4) smali_le_unsigned(bootstrap->value, (int) bootstrap->value_length);
+        if (dex->method_handles != NULL && handle_idx < dex->method_handles_size &&
+            dex->method_handles[handle_idx].method_handle_type >= INVOKE_STATIC)
+            smali_method_ref(stream, dex, dex->method_handles[handle_idx].field_or_method_idx);
+        else
+            smali_write_method_handle(stream, dex, handle_idx);
+        return;
+    }
+    smali_write_encoded_value(stream, dex, bootstrap);
+}
+
 static void smali_write_ref(FILE *stream, jd_meta_dex *dex,
                             smali_ref_kind kind, u4 idx)
 {
@@ -195,9 +359,9 @@ static void smali_write_ref(FILE *stream, jd_meta_dex *dex,
         case REF_STRING:
             smali_string(stream, dex_str_of_idx(dex, idx));
             break;
-        case REF_PROTO:     fprintf(stream, "proto@0x%x", idx); break;
-        case REF_HANDLE:    fprintf(stream, "method_handle@0x%x", idx); break;
-        case REF_CALLSITE:  fprintf(stream, "call_site@0x%x", idx); break;
+        case REF_PROTO:     smali_proto(stream, dex, idx); break;
+        case REF_HANDLE:    smali_write_method_handle(stream, dex, idx); break;
+        case REF_CALLSITE:  smali_write_call_site(stream, dex, idx); break;
         case REF_NONE:      break;
     }
 }
@@ -867,15 +1031,14 @@ static void smali_class_flags(FILE *stream, string flags)
     while (n > 0 && flags[n - 1] == ' ')
         --n;
 
-    static const char *kKind[] = {"class", "interface", "enum"};
-    for (int i = 0; i < 3; ++i) {
-        int k = (int) strlen(kKind[i]);
-        if (n >= k && strncmp(flags + n - k, kKind[i], k) == 0) {
-            n -= k;
-            while (n > 0 && flags[n - 1] == ' ')
-                --n;
-            break;
-        }
+    /* The shared flag printer appends the Java kind word. Smali already has
+     * the .class directive, but interface and enum are access flags. */
+    static const char kClass[] = "class";
+    int k = (int) sizeof(kClass) - 1;
+    if (n >= k && strncmp(flags + n - k, kClass, k) == 0) {
+        n -= k;
+        while (n > 0 && flags[n - 1] == ' ')
+            --n;
     }
     fprintf(stream, "%.*s", n, flags);
 }
@@ -905,6 +1068,8 @@ static void smali_method_defination(jd_meta_dex *dex,
 
     fprintf(_smali_stream(stream), ".method ");
     smali_flags(_smali_stream(stream), access_flags);
+    if (m->access_flags & ACC_DEX_SYNTHETIC)
+        fputs(" synthetic", _smali_stream(stream));
 
     // <init> and <clinit> are marked as constructors, which is how smali
     // tells them apart from a method that merely happens to be called that -
@@ -958,6 +1123,10 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         fprintf(stream, "\n.field ");
         smali_flags(stream, flags);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
+        if (cf->static_values != NULL && i < (int) cf->static_values->size) {
+            fputs(" = ", stream);
+            smali_write_encoded_value(stream, dex, &cf->static_values->values[i]);
+        }
         fputc('\n', stream);
     }
 

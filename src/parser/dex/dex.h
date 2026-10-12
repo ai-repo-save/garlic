@@ -550,6 +550,9 @@ typedef struct jd_meta_dex {
     dex_string_item *strings;
 
     dex_method_handle_item *method_handles;
+    u4 method_handles_size;
+    encoded_array *call_sites;
+    u4 call_sites_size;
 
     jd_bin *bin;
 
