@@ -371,6 +371,10 @@ void dex_smali_class(jd_dex *dex, dex_class_def *cf)
 void dex_to_source(string dex_path, string save_dir)
 {
     jd_meta_dex *meta = parse_dex_file(dex_path);
+    if (meta == NULL) {
+        mem_free_pool();
+        return;
+    }
     meta->source_dir = save_dir;
     mkdir_p(meta->source_dir);
     dex_reserve_output_paths(meta, true);
@@ -586,6 +590,10 @@ void dex_file_analyse(string path, string save_dir, int thread_num, jd_dex_task_
 {
     mem_init_pool();
     jd_meta_dex *meta = parse_dex_file(path);
+    if (meta == NULL) {
+        mem_free_pool();
+        return;
+    }
     meta->source_dir = save_dir;
     dex_reserve_output_paths(meta, type == JD_DEX_TASK_DECOMPILE);
     jd_dex *dex = dex_init(meta, thread_num);
@@ -617,6 +625,10 @@ void dex_file_dump(string path)
 {
     mem_init_pool();
     jd_meta_dex *meta = parse_dex_file(path);
+    if (meta == NULL) {
+        mem_free_pool();
+        return;
+    }
     dexdump(meta);
     mem_free_pool();
 }

@@ -6,6 +6,7 @@
 #include "dex.h"
 #include "dex_tools.h"
 #include "debug.h"
+#include "common/output_error.h"
 #include "metadata.h"
 #include "dex_meta_helper.h"
 #include "decompiler/klass.h"
@@ -64,38 +65,155 @@ static void setup_current_offset(jd_meta_dex *dex, size_t offset)
     dex->bin->cur_off = offset;
 }
 
+/* 结构非法时置位：解析循环据此尽早停止，不再用错误的偏移或索引继续寻址。 */
+static void dex_mark_invalid(jd_meta_dex *dex)
+{
+    if (dex->bin->error == NULL)
+        dex->bin->error = "structure outside the file";
+    dex->bin->overrun = true;
+}
+
+/* 带原因版本：说明具体是哪条约束被违反，便于报告与定位。 */
+static void dex_mark_invalid_reason(jd_meta_dex *dex, const char *reason)
+{
+    if (dex->bin->error == NULL)
+        dex->bin->error = reason;
+    dex->bin->overrun = true;
+}
+
+static bool dex_invalid(jd_meta_dex *dex)
+{
+    return dex->bin->overrun;
+}
+
+static bool dex_range_ok(jd_meta_dex *dex, u8 offset, u8 length)
+{
+    if (offset > dex->bin->buffer_size || length > dex->bin->buffer_size - offset)
+        return false;
+    return true;
+}
+
+/* size 为 0 的表允许 offset 为 0；其余情况要求整张表落在文件内。 */
+static bool dex_table_ok(jd_meta_dex *dex, u4 offset, u4 size, u4 stride)
+{
+    if (size == 0)
+        return true;
+    return dex_range_ok(dex, offset, (u8) size * stride);
+}
+
+/* 条目数上限：每个条目至少占 min_size 字节，防止按文件里的计数分配超大数组。 */
+static bool dex_count_ok_at(jd_meta_dex *dex, size_t offset, u4 count, u4 min_size)
+{
+    if (offset > dex->bin->buffer_size)
+        return false;
+    u8 remaining = dex->bin->buffer_size - offset;
+    if (min_size == 0)
+        return count <= remaining;
+    return (u8) count * min_size <= remaining;
+}
+
+/* uleb128p1：0 表示 NO_INDEX，其余减一后必须是合法表索引。 */
+static u4 read_idx_p1(jd_meta_dex *dex, u4 table_size)
+{
+    u4 raw = read_unsigned_leb128(dex);
+    if (raw == 0)
+        return NO_INDEX;
+    if (raw - 1 >= table_size) {
+        dex_mark_invalid_reason(dex, "index outside its table");
+        return NO_INDEX;
+    }
+    return raw - 1;
+}
+
 static void parse_dex_header(jd_meta_dex *dex)
 {
+    if (dex->bin->buffer_size < sizeof(dex_header)) {
+        dex_mark_invalid_reason(dex, "file is smaller than the dex header");
+        return;
+    }
     dex->header = (dex_header *) dex->bin->buffer;
+    if (dex->header->file_size > dex->bin->buffer_size)
+        dex_mark_invalid_reason(dex, "header file_size exceeds the file");
+    else if (dex->header->header_size != sizeof(dex_header))
+        dex_mark_invalid_reason(dex, "unexpected header_size");
+    else if (dex->header->endian_tag != 0x12345678u)
+        dex_mark_invalid_reason(dex, "unexpected endian_tag");
 }
 
 static void parse_dex_links(jd_meta_dex *dex)
 {
+    if (dex_invalid(dex) || dex->header->link_size == 0) {
+        dex->links = NULL;
+        return;
+    }
+    if (!dex_range_ok(dex, dex->header->link_off, (u8) dex->header->link_size * 4)) {
+        dex_mark_invalid(dex);
+        return;
+    }
     dex->links = (dex_link *) (dex->bin->buffer + dex->header->link_off);
 }
 
 static void parse_dex_map_list(jd_meta_dex *dex)
 {
-    dex->maps = (dex_map_list *) (dex->bin->buffer + dex->header->map_off);
+    if (dex_invalid(dex)) {
+        dex->maps = NULL;
+        return;
+    }
+    u4 map_off = dex->header->map_off;
+    if (map_off == 0 || !dex_range_ok(dex, map_off, 4)) {
+        dex_mark_invalid(dex);
+        dex->maps = NULL;
+        return;
+    }
+    dex->maps = (dex_map_list *) (dex->bin->buffer + map_off);
+    if (!dex_range_ok(dex, (u8) map_off + 4, (u8) dex->maps->size * sizeof(dex_map_item))) {
+        dex_mark_invalid_reason(dex, "map_list outside the file");
+        dex->maps = NULL;
+    }
 }
 
 static int dex_string_byte_size(jd_meta_dex *dex, uint32_t utf16_size)
 {
     int real, cnt;
     for (real = 0, cnt = 0; cnt < utf16_size; ++real, ++cnt) {
+        /* 字符串内容必须以 NUL 结尾，并完整落在文件内。 */
+        if (!dex_range_ok(dex, (u8) real + dex->bin->cur_off, 1)) {
+            dex_mark_invalid(dex);
+            return real;
+        }
         unsigned char c = dex->bin->buffer[real + dex->bin->cur_off];
+        if (c == 0) {
+            dex_mark_invalid(dex);
+            return real;
+        }
         if (c > 0 && c < 127) {
         }
         else if (c >= 0xE0) {
+            if (!dex_range_ok(dex, (u8) real + dex->bin->cur_off, 3)) {
+                dex_mark_invalid(dex);
+                return real;
+            }
             real += 2;
         }
         else if (c >= 0xC2) {
+            if (!dex_range_ok(dex, (u8) real + dex->bin->cur_off, 2)) {
+                dex_mark_invalid(dex);
+                return real;
+            }
             real += 1;
         }
         else if (c == 0xC0) {
+            if (!dex_range_ok(dex, (u8) real + 1 + dex->bin->cur_off, 1)) {
+                dex_mark_invalid(dex);
+                return real;
+            }
             unsigned char nc = dex->bin->buffer[real+1 + dex->bin->cur_off];
             if (nc == 0x80)
                 real += 1;
+        }
+        else {
+            dex_mark_invalid(dex);
+            return real;
         }
     }
     return real;
@@ -104,6 +222,12 @@ static int dex_string_byte_size(jd_meta_dex *dex, uint32_t utf16_size)
 static void parse_dex_string_ids(jd_meta_dex *dex)
 {
     dex_header *header = dex->header;
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, header->string_ids_off, header->string_ids_size, sizeof(dex_string_id))) {
+        dex_mark_invalid_reason(dex, "string_ids outside the file");
+        return;
+    }
     dex->string_ids = (dex_string_id *) (dex->bin->buffer + header->string_ids_off);
 
 
@@ -111,15 +235,31 @@ static void parse_dex_string_ids(jd_meta_dex *dex)
                                    header->string_ids_size,
                                    dex->pool);
     for (int i = 0; i < header->string_ids_size; ++i) {
+        if (dex_invalid(dex))
+            return;
         dex_string_id *string_id = &dex->string_ids[i];
         dex_string_item *item = &dex->strings[i];
 
+        if (!dex_range_ok(dex, string_id->string_data_off, 1)) {
+            dex_mark_invalid(dex);
+            return;
+        }
         setup_current_offset(dex, string_id->string_data_off);
 
         int size = read_unsigned_leb128(dex);
         item->utf16_size = size;
 
         int real = dex_string_byte_size(dex, size);
+        if (dex_invalid(dex))
+            return;
+        /* 长度前缀必须与实际内容一致并以 NUL 结束，否则字符串会被静默截断。
+         * cur_off 已越过长度前缀，因此终止符位置是 cur_off + real。 */
+        size_t content_off = dex->bin->cur_off;
+        if (!dex_range_ok(dex, (u8) content_off + real, 1) ||
+            dex->bin->buffer[content_off + real] != '\0') {
+            dex_mark_invalid_reason(dex, "string_data_item length does not match utf16_size");
+            return;
+        }
 
         item->data = x_alloc_in(dex->pool, real+1);
         memset(item->data, 0, real+1);
@@ -131,6 +271,12 @@ static void parse_dex_string_ids(jd_meta_dex *dex)
 
 static void parse_dex_type_ids(jd_meta_dex *dex)
 {
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, dex->header->type_ids_off, dex->header->type_ids_size, sizeof(dex_type_id))) {
+        dex_mark_invalid_reason(dex, "type_ids outside the file");
+        return;
+    }
     dex->type_ids = (dex_type_id *) (dex->bin->buffer + dex->header->type_ids_off);
 }
 
@@ -139,6 +285,12 @@ static void parse_dex_proto_ids(jd_meta_dex *dex)
     mem_pool *pool = dex->pool;
     u4 size = 0;
     dex_header *header = dex->header;
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, header->proto_ids_off, header->proto_ids_size, sizeof(dex_proto_id))) {
+        dex_mark_invalid_reason(dex, "proto_ids outside the file");
+        return;
+    }
     setup_current_offset(dex, header->proto_ids_off);
     size_t dex_type_item_size = sizeof(dex_type_item);
     size = header->proto_ids_size;
@@ -153,16 +305,28 @@ static void parse_dex_proto_ids(jd_meta_dex *dex)
 
     for (int i = 0; i < header->proto_ids_size; ++i)
     {
+        if (dex_invalid(dex))
+            return;
         dex_proto_id *proto_id = &dex->proto_ids[i];
         if (proto_id->parameters_off == 0) {
             proto_id->type_list = NULL;
         }
         else {
+            if (!dex_range_ok(dex, proto_id->parameters_off, 4)) {
+                dex_mark_invalid(dex);
+                return;
+            }
             setup_current_offset(dex, proto_id->parameters_off);
             proto_id->type_list = make_obj_in(dex_type_list, dex->pool);
             jdex_read4(dex, &proto_id->type_list->size);
 
             size = proto_id->type_list->size;
+            /* 每个条目占 2 字节，先确认整张表在文件内，避免按错误的尺寸分配。 */
+            if (!dex_range_ok(dex, (u8) proto_id->parameters_off + 4, (u8) size * 2)) {
+                dex_mark_invalid_reason(dex, "proto type_list outside the file");
+                proto_id->type_list = NULL;
+                return;
+            }
             dex_type_item *list = make_obj_arr_in(dex_type_item, size, pool);
             proto_id->type_list->list = list;
             jdex_read(dex, list, dex_type_item_size*size);
@@ -173,11 +337,23 @@ static void parse_dex_proto_ids(jd_meta_dex *dex)
 
 static void parse_dex_field_ids(jd_meta_dex *dex)
 {
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, dex->header->field_ids_off, dex->header->field_ids_size, sizeof(dex_field_id))) {
+        dex_mark_invalid(dex);
+        return;
+    }
     dex->field_ids = (dex_field_id *) (dex->bin->buffer + dex->header->field_ids_off);
 }
 
 static void parse_dex_method_ids(jd_meta_dex *dex)
 {
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, dex->header->method_ids_off, dex->header->method_ids_size, sizeof(dex_method_id))) {
+        dex_mark_invalid(dex);
+        return;
+    }
     dex->method_ids = (dex_method_id *) (dex->bin->buffer + dex->header->method_ids_off);
 }
 
@@ -186,6 +362,10 @@ static void parse_dex_class_interfaces(jd_meta_dex *dex, dex_class_def *cdef)
     if (cdef->interfaces_off == 0)
         return;
 
+    if (!dex_range_ok(dex, cdef->interfaces_off, 4)) {
+        dex_mark_invalid(dex);
+        return;
+    }
     setup_current_offset(dex, cdef->interfaces_off);
     cdef->interfaces = make_obj_in(dex_type_list, dex->pool);
     dex_type_list *interfaces = cdef->interfaces;
@@ -193,6 +373,11 @@ static void parse_dex_class_interfaces(jd_meta_dex *dex, dex_class_def *cdef)
 
     u4 size = interfaces->size;
     size_t item_size = sizeof(dex_type_item);
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, size, item_size)) {
+        dex_mark_invalid(dex);
+        cdef->interfaces = NULL;
+        return;
+    }
     cdef->interfaces->list = make_obj_arr_in(dex_type_item, size, dex->pool);
     jdex_read(dex, interfaces->list, item_size*size);
 }
@@ -262,9 +447,12 @@ static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
             value->value_length = 0;
             break;
         default:
-            fprintf(stderr, "[annotation value]: value_type: %0x\n",
-                    value->value_type);
-            abort();
+            /* 未定义的值类型是非法输入，不是内部不变量被破坏：标记后停止解析。 */
+            DEBUG_PRINT("[annotation value]: value_type: %0x\n",
+                        value->value_type);
+            dex_mark_invalid_reason(dex, "unknown encoded_value type");
+            value->value = NULL;
+            break;
     }
 }
 
@@ -375,9 +563,15 @@ static void parse_dex_annotation_off_item(jd_meta_dex *dex,
 static annotation_set_item* parse_dex_ano_set_item(jd_meta_dex *dex,
                                                    u4 offset)
 {
+    if (dex_invalid(dex) || !dex_range_ok(dex, offset, 4))
+        return NULL;
     setup_current_offset(dex, offset);
     annotation_set_item *item = make_obj_in(annotation_set_item, dex->pool);
     jdex_read4(dex, &item->size);
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, item->size, 4)) {
+        dex_mark_invalid(dex);
+        return NULL;
+    }
     item->entries = make_obj_arr_in(annotation_off_item, item->size, dex->pool);
     for (int i = 0; i < item->size; ++i) {
         annotation_off_item *off_item = &item->entries[i];
@@ -393,10 +587,16 @@ static annotation_set_item* parse_dex_ano_set_item(jd_meta_dex *dex,
 
 static ano_ref_list* parse_dex_ano_ref_list(jd_meta_dex *dex, u4 offset)
 {
+    if (dex_invalid(dex) || !dex_range_ok(dex, offset, 4))
+        return NULL;
     setup_current_offset(dex, offset);
     ano_ref_list *ref_list = make_obj_in(ano_ref_list, dex->pool);
 
     jdex_read4(dex, &ref_list->size);
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, ref_list->size, 4)) {
+        dex_mark_invalid(dex);
+        return NULL;
+    }
     ref_list->list = make_obj_arr_in(ano_ref_item, ref_list->size, dex->pool);
     for (int i = 0; i < ref_list->size; ++i) {
         annotation_set_ref_item *item = &ref_list->list[i];
@@ -506,6 +706,10 @@ static void parse_dex_code_try_item(jd_meta_dex *dex, dex_code_item *code)
     if (code->tries_size == 0)
         return;
 
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, code->tries_size, sizeof(dex_try_item))) {
+        dex_mark_invalid(dex);
+        return;
+    }
     if (code->tries_size > 0 && code->insns_size % 2 > 0) {
         jdex_read2(dex, &code->padding);
     }
@@ -518,6 +722,15 @@ static void parse_dex_code_try_item(jd_meta_dex *dex, dex_code_item *code)
         jdex_read4(dex, &try_item->start_addr);
         jdex_read2(dex, &try_item->insn_count);
         jdex_read2(dex, &try_item->handler_off);
+        /* 区间必须落在 insns 内，否则异常表会按越界地址寻址。 */
+        if ((u8) try_item->start_addr + try_item->insn_count > code->insns_size) {
+            dex_mark_invalid_reason(dex, "try range outside insns");
+            return;
+        }
+        if (try_item->handler_off >= dex->bin->buffer_size) {
+            dex_mark_invalid_reason(dex, "handler_off outside the handler list");
+            return;
+        }
         DEBUG_PRINT("[try_item]:"
                     "startAddr: %d "
                     "insnCount: %d, "
@@ -534,6 +747,10 @@ static void parse_dex_code_try_item(jd_meta_dex *dex, dex_code_item *code)
     code->handlers = make_obj_in(encoded_catch_handler_list, dex->pool);
     u4 size = read_unsigned_leb128(dex);
     code->handlers->size = size;
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 0)) {
+        dex_mark_invalid(dex);
+        return;
+    }
     code->handlers->list = make_obj_arr_in(encoded_catch_handler, size, pool);
     DEBUG_PRINT("handlers size: %d\n", code->handlers->size);
     for (int j = 0; j < code->handlers->size; ++j) {
@@ -542,8 +759,14 @@ static void parse_dex_code_try_item(jd_meta_dex *dex, dex_code_item *code)
         handler->handler_off = dex->bin->cur_off - handler_offset;
         handler->size = read_signed_leb128(dex);
 
+        if (dex_invalid(dex))
+            return;
         if (handler->size != 0) {
             int sz = abs(handler->size);
+            if (!dex_count_ok_at(dex, dex->bin->cur_off, sz, 2)) {
+                dex_mark_invalid(dex);
+                return;
+            }
             encoded_tp *pairs = make_obj_arr_in(encoded_tp, sz, pool);
             handler->handlers = pairs;
             for (int k = 0; k < abs(handler->size); ++k) {
@@ -638,7 +861,7 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
     debug_info->items = items;
     u4 itor = 0;
     for (int i = 0; i < debug_info->parameters_size; ++i) {
-        u4 name_idx = read_unsigned_leb128(dex) - 1;
+        u4 name_idx = read_idx_p1(dex, dex->header->string_ids_size);
         debug_info->parameter_name[i] = name_idx;
         if (name_idx != NO_INDEX) {
             string param_name = dex_str_of_idx(dex, name_idx);
@@ -679,8 +902,8 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
             }
             case DBG_START_LOCAL: {
                 s4 reg = read_unsigned_leb128(dex);
-                u4 name_idx = read_unsigned_leb128(dex) - 1;
-                u4 type_idx = read_unsigned_leb128(dex) - 1;
+                u4 name_idx = read_idx_p1(dex, dex->header->string_ids_size);
+                u4 type_idx = read_idx_p1(dex, dex->header->type_ids_size);
 
                 dex_dbg_item *dbg_item = &items[itor++];
                 dbg_item->code = DBG_START_LOCAL;
@@ -693,9 +916,9 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
             }
             case DBG_START_LOCAL_EXTENDED: {
                 s4 reg = read_unsigned_leb128(dex);
-                u4 name_idx = read_unsigned_leb128(dex) - 1;
-                u4 type_idx = read_unsigned_leb128(dex) - 1;
-                u4 sig_idx = read_unsigned_leb128(dex) - 1;
+                u4 name_idx = read_idx_p1(dex, dex->header->string_ids_size);
+                u4 type_idx = read_idx_p1(dex, dex->header->type_ids_size);
+                u4 sig_idx = read_idx_p1(dex, dex->header->string_ids_size);
 
                 dex_dbg_item *dbg_item = &items[itor++];
                 dbg_item->code = DBG_START_LOCAL_EXTENDED;
@@ -729,7 +952,7 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
                 break;
             }
             case DBG_SET_FILE: {
-                u4 name_idx = read_unsigned_leb128(dex) - 1;
+                u4 name_idx = read_idx_p1(dex, dex->header->string_ids_size);
                 dex_dbg_item *dbg_item = &items[itor++];
                 dbg_item->code = DBG_SET_FILE;
                 dbg_item->offset = address;
@@ -761,8 +984,23 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
 static void parse_dex_code_item(jd_meta_dex *dex, encoded_method *em)
 {
     mem_pool *pool = dex->pool;
+    if (dex_invalid(dex))
+        return;
+    if (em->method_id >= dex->header->method_ids_size) {
+        dex_mark_invalid(dex);
+        return;
+    }
     dex_method_id *method_id = &dex->method_ids[em->method_id];
+    if (method_id->name_idx >= dex->header->string_ids_size) {
+        dex_mark_invalid(dex);
+        return;
+    }
     string method_name = dex->strings[method_id->name_idx].data;
+    if (!dex_range_ok(dex, em->code_off, 16)) {
+        dex_mark_invalid_reason(dex, "code_item outside the file");
+        em->code = NULL;
+        return;
+    }
     setup_current_offset(dex, em->code_off);
     em->code = make_obj_in(dex_code_item, pool);
     dex_code_item *code = em->code;
@@ -773,6 +1011,11 @@ static void parse_dex_code_item(jd_meta_dex *dex, encoded_method *em)
     jdex_read4(dex, &code->debug_info_off);
     jdex_read4(dex, &code->insns_size);
 
+    if (!dex_range_ok(dex, dex->bin->cur_off, sizeof(u2) * (u8) code->insns_size)) {
+        dex_mark_invalid_reason(dex, "insns outside the file");
+        code->insns = NULL;
+        return;
+    }
     code->insns = (u2 *) (dex->bin->buffer + dex->bin->cur_off);
     setup_current_offset(dex, dex->bin->cur_off + sizeof(u2)*code->insns_size);
 
@@ -803,6 +1046,13 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
     cdata->instance_fields_size    = read_unsigned_leb128(dex);
     cdata->direct_methods_size     = read_unsigned_leb128(dex);
     cdata->virtual_methods_size    = read_unsigned_leb128(dex);
+    /* 每个成员在流中至少占 2 字节，先确认计数与文件剩余字节相符。 */
+    if (!dex_count_ok_at(dex, dex->bin->cur_off,
+                         cdata->static_fields_size + cdata->instance_fields_size +
+                         cdata->direct_methods_size + cdata->virtual_methods_size, 2)) {
+        dex_mark_invalid_reason(dex, "class_data counts exceed the file");
+        return;
+    }
 
     u4 size = 0;
     mem_pool *pool = dex->pool;
@@ -913,6 +1163,12 @@ static void parse_dex_class_defs(jd_meta_dex *dex)
 {
     dex_header *header = dex->header;
     mem_pool *pool = dex->pool;
+    if (dex_invalid(dex))
+        return;
+    if (!dex_table_ok(dex, header->class_defs_off, header->class_defs_size, sizeof(dex_class_def))) {
+        dex_mark_invalid_reason(dex, "class_defs outside the file");
+        return;
+    }
     setup_current_offset(dex, header->class_defs_off);
 
     u4 size = header->class_defs_size;
@@ -947,6 +1203,8 @@ static void parse_dex_class_defs(jd_meta_dex *dex)
     }
 
     for (int i = 0; i < header->class_defs_size; ++i) {
+        if (dex_invalid(dex))
+            return;
         dex_class_def *class_def = &dex->class_defs[i];
         parse_dex_class_interfaces(dex, class_def);
         parse_dex_class_defs_anos(dex, class_def);
@@ -1009,28 +1267,43 @@ jd_meta_dex* parse_dex_file(string path)
 
     init_dex_extract_data(dex);
 
+    /* 任一步骤发现结构非法就立即停止：后续阶段假定前面的表已经建好。 */
     parse_dex_header(dex);
 
-    parse_dex_links(dex);
+    if (!dex_invalid(dex))
+        parse_dex_links(dex);
 
-    parse_dex_map_list(dex);
+    if (!dex_invalid(dex))
+        parse_dex_map_list(dex);
 
-    parse_dex_string_ids(dex);
+    if (!dex_invalid(dex))
+        parse_dex_string_ids(dex);
 
-    parse_dex_type_ids(dex);
+    if (!dex_invalid(dex))
+        parse_dex_type_ids(dex);
 
-    parse_dex_proto_ids(dex);
+    if (!dex_invalid(dex))
+        parse_dex_proto_ids(dex);
 
-    parse_dex_field_ids(dex);
+    if (!dex_invalid(dex))
+        parse_dex_field_ids(dex);
 
-    parse_dex_method_ids(dex);
+    if (!dex_invalid(dex))
+        parse_dex_method_ids(dex);
 
-    parse_dex_class_defs(dex);
+    if (!dex_invalid(dex))
+        parse_dex_class_defs(dex);
 
-    parse_dex_method_handles(dex);
+    if (!dex_invalid(dex))
+        parse_dex_method_handles(dex);
 
-    parse_dex_call_sites(dex);
+    if (!dex_invalid(dex))
+        parse_dex_call_sites(dex);
 
+    if (dex->bin->overrun) {
+        output_input_rejected(path, dex->bin->error);
+        return NULL;
+    }
     return dex;
 }
 
@@ -1047,27 +1320,42 @@ jd_meta_dex* parse_dex_from_buffer(char *buffer, size_t size)
 
     init_dex_extract_data(meta);
 
+    /* 同 parse_dex_file：任一阶段发现非法即停止。 */
     parse_dex_header(meta);
 
-    parse_dex_links(meta);
+    if (!dex_invalid(meta))
+        parse_dex_links(meta);
 
-    parse_dex_map_list(meta);
+    if (!dex_invalid(meta))
+        parse_dex_map_list(meta);
 
-    parse_dex_string_ids(meta);
+    if (!dex_invalid(meta))
+        parse_dex_string_ids(meta);
 
-    parse_dex_type_ids(meta);
+    if (!dex_invalid(meta))
+        parse_dex_type_ids(meta);
 
-    parse_dex_proto_ids(meta);
+    if (!dex_invalid(meta))
+        parse_dex_proto_ids(meta);
 
-    parse_dex_field_ids(meta);
+    if (!dex_invalid(meta))
+        parse_dex_field_ids(meta);
 
-    parse_dex_method_ids(meta);
+    if (!dex_invalid(meta))
+        parse_dex_method_ids(meta);
 
-    parse_dex_class_defs(meta);
+    if (!dex_invalid(meta))
+        parse_dex_class_defs(meta);
 
-    parse_dex_method_handles(meta);
+    if (!dex_invalid(meta))
+        parse_dex_method_handles(meta);
 
-    parse_dex_call_sites(meta);
+    if (!dex_invalid(meta))
+        parse_dex_call_sites(meta);
 
+    if (meta->bin->overrun) {
+        output_input_rejected(NULL, meta->bin->error);
+        return NULL;
+    }
     return meta;
 }

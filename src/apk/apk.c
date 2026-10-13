@@ -135,6 +135,10 @@ static void apk_process_dex_from_zip(jd_apk *apk, struct zip_t *zip)
         zip_entry_close(zip);
 
         jd_meta_dex *meta = parse_dex_from_buffer(buf, buf_size);
+        if (meta == NULL) {
+            free(buf);
+            continue;
+        }
         apk_run_dex_tasks(apk, meta);
     }
 }

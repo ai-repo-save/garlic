@@ -797,6 +797,10 @@ static void apk_analyzer_process_zip(struct zip_t *zip)
         zip_entry_close(zip);
 
         jd_meta_dex *meta = parse_dex_from_buffer(buf, buf_size);
+        if (meta == NULL) {
+            free(buf);
+            continue;
+        }
         dex_analyzer(g_dumpper_analyer, meta);
 
         mem_pool_free(meta->pool);
