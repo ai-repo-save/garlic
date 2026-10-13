@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/fcntl.h>
 #include "mem_pool.h"
 #include "dex.h"
@@ -42,33 +43,19 @@ int read_unsigned_leb128(jd_meta_dex *dex)
 
 int read_signed_leb128(jd_meta_dex *dex)
 {
-    s1 leb = 0;
-    if (jdex_read1(dex, &leb) == 0) return 0;
-    int result = leb;
-    if(result <= 0x7f)
-        result = (result << 25) >> 25;
-    else {
-        leb = 0; if (jdex_read1(dex, &leb) == 0) return result;
-        result = (result & 0x7f) | ((leb & 0x7f) << 7);
-        if(leb <= 0x7f)
-            result = (result << 18) >> 18;
-        else {
-            leb = 0; if (jdex_read1(dex, &leb) == 0) return result;
-            result |= (leb & 0x7f) << 14;
-            if(leb <= 0x7f)
-                result = (result << 11) >> 11;
-            else {
-                leb = 0; if (jdex_read1(dex, &leb) == 0) return result;
-                result |= (leb & 0x7f) << 21;
-                if(leb <= 0x7f)
-                    result = (result << 4) >> 4;
-                else {
-                    leb = 0; if (jdex_read1(dex, &leb) == 0) return result;
-                    result |= leb << 28;
-                }
-            }
-        }
-    }
+    int result = 0;
+    int shift = 0;
+    u1 byte = 0;
+
+    do {
+        if (jdex_read1(dex, &byte) == 0)
+            return result;
+        result |= (byte & 0x7f) << shift;
+        shift += 7;
+    } while ((byte & 0x80) != 0 && shift < 32);
+
+    if (shift < 32 && (byte & 0x40) != 0)
+        result |= -(1 << shift);
     return result;
 }
 
@@ -627,23 +614,26 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
             }
             case DBG_SET_FILE:
             case DBG_END_LOCAL:
+            case DBG_RESTART_LOCAL:
+                read_unsigned_leb128(dex);
+                dbg_size++;
+                break;
             case DBG_ADVANCE_PC:
-            case DBG_RESTART_LOCAL: {
                 read_unsigned_leb128(dex);
                 break;
-            }
             case DBG_SET_PROLOGUE_END:
-            case DBG_SET_EPILOGUE_BEGIN: {
+            case DBG_SET_EPILOGUE_BEGIN:
+                dbg_size++;
                 break;
-            }
-            default: {
-                continue;
-            }
+            default:
+                dbg_size++;
+                break;
         }
     }
 
     setup_current_offset(dex, current_offset);
     dex_dbg_item *items = make_obj_arr_in(dex_dbg_item, dbg_size, pool);
+    memset(items, 0, sizeof(*items) * dbg_size);
     debug_info->dbg_size = dbg_size;
     debug_info->items = items;
     u4 itor = 0;
@@ -657,6 +647,8 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
         }
         dex_dbg_item *dbg_item = &items[itor];
         dbg_item->name_idx = debug_info->parameter_name[i];
+        dbg_item->type_idx = NO_INDEX;
+        dbg_item->sig_idx = NO_INDEX;
         dbg_item->code = DBG_START_LOCAL;
         dbg_item->offset = 0;
         dbg_item->reg_num = i;
@@ -665,10 +657,12 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
 
     dbg_opcode = 0;
     u4 address = 0;
-    u4 line = 0;
+    s4 line = (s4) debug_info->line_start;
     while (1) {
         jdex_read1(dex, &dbg_opcode);
         if (dbg_opcode == DBG_END_SEQUENCE)
+            break;
+        if (itor >= dbg_size)
             break;
         switch (dbg_opcode) {
             case DBG_ADVANCE_PC: {
@@ -679,6 +673,7 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
             }
             case DBG_ADVANCE_LINE: {
                 s4 line_diff = read_signed_leb128(dex);
+                line += line_diff;
                 DEBUG_PRINT("\t[DBG_ADVANCE_LINE]: %d\n", line_diff);
                 break;
             }
@@ -687,56 +682,77 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
                 u4 name_idx = read_unsigned_leb128(dex) - 1;
                 u4 type_idx = read_unsigned_leb128(dex) - 1;
 
-                dex_dbg_item *dbg_item = &items[itor];
+                dex_dbg_item *dbg_item = &items[itor++];
                 dbg_item->code = DBG_START_LOCAL;
                 dbg_item->offset = address;
                 dbg_item->reg_num = reg;
                 dbg_item->name_idx = name_idx;
-                itor++;
+                dbg_item->type_idx = type_idx;
+                dbg_item->sig_idx = NO_INDEX;
                 break;
             }
             case DBG_START_LOCAL_EXTENDED: {
                 s4 reg = read_unsigned_leb128(dex);
                 u4 name_idx = read_unsigned_leb128(dex) - 1;
                 u4 type_idx = read_unsigned_leb128(dex) - 1;
-                u4 sig_idx = read_unsigned_leb128(dex) -1;
+                u4 sig_idx = read_unsigned_leb128(dex) - 1;
 
-                dex_dbg_item *dbg_item = &items[itor];
-                dbg_item->code = DBG_START_LOCAL;
+                dex_dbg_item *dbg_item = &items[itor++];
+                dbg_item->code = DBG_START_LOCAL_EXTENDED;
                 dbg_item->offset = address;
                 dbg_item->reg_num = reg;
                 dbg_item->name_idx = name_idx;
-                itor++;
+                dbg_item->type_idx = type_idx;
+                dbg_item->sig_idx = sig_idx;
                 break;
             }
-            case DBG_END_LOCAL: {
-                s4 reg = read_unsigned_leb128(dex);
-                DEBUG_PRINT("\t[DBG_END_LOCAL]: %d\n", reg);
-                break;
-            }
+            case DBG_END_LOCAL:
             case DBG_RESTART_LOCAL: {
                 s4 reg = read_unsigned_leb128(dex);
-                DEBUG_PRINT("\t[DBG_RESTART_LOCAL]: %d\n", reg);
+                dex_dbg_item *dbg_item = &items[itor++];
+                dbg_item->code = dbg_opcode;
+                dbg_item->offset = address;
+                dbg_item->reg_num = reg;
+                dbg_item->name_idx = NO_INDEX;
+                dbg_item->type_idx = NO_INDEX;
+                dbg_item->sig_idx = NO_INDEX;
                 break;
             }
-            case DBG_SET_PROLOGUE_END: {
-                DEBUG_PRINT("\t[DBG_SET_PROLOGUE_END]\n");
-                break;
-            }
+            case DBG_SET_PROLOGUE_END:
             case DBG_SET_EPILOGUE_BEGIN: {
-                DEBUG_PRINT("\t[DBG_SET_EPILOGUE_BEGIN]\n");
+                dex_dbg_item *dbg_item = &items[itor++];
+                dbg_item->code = dbg_opcode;
+                dbg_item->offset = address;
+                dbg_item->name_idx = NO_INDEX;
+                dbg_item->type_idx = NO_INDEX;
+                dbg_item->sig_idx = NO_INDEX;
                 break;
             }
             case DBG_SET_FILE: {
                 u4 name_idx = read_unsigned_leb128(dex) - 1;
+                dex_dbg_item *dbg_item = &items[itor++];
+                dbg_item->code = DBG_SET_FILE;
+                dbg_item->offset = address;
+                dbg_item->name_idx = name_idx;
+                dbg_item->type_idx = NO_INDEX;
+                dbg_item->sig_idx = NO_INDEX;
                 DEBUG_PRINT("\t[DBG_SET_FILE]: %d\n", name_idx);
                 break;
             }
             default: {
                 u4 adjusted_opcode = dbg_opcode - DBG_FIRST_SPECIAL;
                 address += (adjusted_opcode / DBG_LINE_RANGE);
-                DEBUG_PRINT("\t[DBG_SPEC]: %d addr: %d\n", dbg_opcode, address);
-                continue;
+                line += (s4) (adjusted_opcode % DBG_LINE_RANGE) + DBG_LINE_BASE;
+                dex_dbg_item *dbg_item = &items[itor++];
+                dbg_item->code = DBG_FIRST_SPECIAL;
+                dbg_item->offset = address;
+                dbg_item->name_idx = NO_INDEX;
+                dbg_item->type_idx = NO_INDEX;
+                dbg_item->sig_idx = NO_INDEX;
+                dbg_item->line = line;
+                DEBUG_PRINT("\t[DBG_SPEC]: %d addr: %d line: %d\n",
+                            dbg_opcode, address, line);
+                break;
             }
         }
     }

@@ -448,6 +448,7 @@ typedef struct {
     u4 name_idx;
     u4 type_idx;
     u4 sig_idx;
+    s4 line;
 } dex_dbg_item;
 
 typedef struct {
