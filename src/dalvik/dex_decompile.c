@@ -613,6 +613,11 @@ void dex_file_analyse(string path, string save_dir, int thread_num, jd_dex_task_
         }
     }
 
+    /* 写入阶段可能才发现非法结构（例如按越界索引取名字）。此时已经写出部分文件，
+     * 但整体必须判为失败，使退出码非零。 */
+    if (meta->bin->overrun)
+        output_input_rejected(path, meta->bin->error);
+
     dex_release(dex);
 
     dex_lambda_report(meta);

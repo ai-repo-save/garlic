@@ -1283,7 +1283,10 @@ static void smali_write_class_def(jd_meta_dex *dex,
                                   FILE *stream)
 {
     string class_name = dex_str_of_type_id(dex, cf->class_idx);
-    string super_name = dex_str_of_type_id(dex, cf->superclass_idx);
+    /* 根类的 superclass_idx 是 NO_INDEX：不要去查表，否则会触发越界保护。 */
+    string super_name = cf->superclass_idx == 0xFFFFFFFF
+                            ? ""
+                            : dex_str_of_type_id(dex, cf->superclass_idx);
 
     str_list *list = str_list_init();
     dex_class_access_flag_with_flags(cf->access_flags, list);

@@ -1119,6 +1119,10 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
                 field->field_id = start_idx + field->field_idx_diff;
                 start_idx = field->field_id;
             }
+            if (field->field_id >= dex->header->field_ids_size) {
+                dex_mark_invalid_reason(dex, "class_data field index outside field_ids");
+                return;
+            }
         }
     }
 
@@ -1137,6 +1141,10 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
                 field->field_id = start_idx + field->field_idx_diff;
                 start_idx = field->field_id;
             }
+            if (field->field_id >= dex->header->field_ids_size) {
+                dex_mark_invalid_reason(dex, "class_data field index outside field_ids");
+                return;
+            }
         }
     }
 
@@ -1154,6 +1162,10 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
             else {
                 method->method_id = start_idx + method->method_idx_diff;
                 start_idx = method->method_id;
+            }
+            if (method->method_id >= dex->header->method_ids_size) {
+                dex_mark_invalid_reason(dex, "class_data method index outside method_ids");
+                return;
             }
 
             if (dex_encoded_method_is_lambda(dex, method)) {
@@ -1177,10 +1189,14 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
                 method->method_id = start_idx + method->method_idx_diff;
                 start_idx = method->method_id;
             }
+            if (method->method_id >= dex->header->method_ids_size) {
+                dex_mark_invalid_reason(dex, "class_data method index outside method_ids");
+                return;
+            }
 
-             if (dex_encoded_method_is_lambda(dex, method)) {
-                 hset_u4obj(dex->lambda_method_map, method->method_id, method);
-             }
+            if (dex_encoded_method_is_lambda(dex, method)) {
+                hset_u4obj(dex->lambda_method_map, method->method_id, method);
+            }
         }
     }
 
