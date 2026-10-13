@@ -107,15 +107,17 @@ static bool dex_table_ok(jd_meta_dex *dex, u4 offset, u4 size, u4 stride)
     return dex_range_ok(dex, offset, (u8) size * stride);
 }
 
-/* 条目数上限：每个条目至少占 min_size 字节，防止按文件里的计数分配超大数组。 */
-static bool dex_count_ok_at(jd_meta_dex *dex, size_t offset, u4 count, u4 min_size)
+/* 条目数上限：每个条目至少占 min_size 字节，防止按文件里的计数分配超大数组。
+ * min_size 为 0 表示每个条目至少占 1 字节（uleb 编码的可变长条目）。
+ * count 用 u8：调用方会传入若干计数的和，u4 求和可能回绕后通过校验。 */
+static bool dex_count_ok_at(jd_meta_dex *dex, size_t offset, u8 count, u4 min_size)
 {
     if (offset > dex->bin->buffer_size)
         return false;
     u8 remaining = dex->bin->buffer_size - offset;
     if (min_size == 0)
         return count <= remaining;
-    return (u8) count * min_size <= remaining;
+    return count * (u8) min_size <= remaining;
 }
 
 /* uleb128p1：0 表示 NO_INDEX，其余减一后必须是合法表索引。 */
@@ -435,14 +437,7 @@ static void parse_dex_class_interfaces(jd_meta_dex *dex, dex_class_def *cdef)
 /* 嵌套深度上限：每层至少消耗 1 字节，深嵌套会让递归耗尽栈。 */
 #define DEX_MAX_ENCODED_DEPTH 32
 
-static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value, int depth);
-
-static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
-{
-    parse_dex_encoded_value_depth(dex, value, 0);
-}
-
-static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value, int depth)
+static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value, int depth)
 {
     if (depth > DEX_MAX_ENCODED_DEPTH) {
         dex_mark_invalid_reason(dex, "encoded_value nesting too deep");
@@ -491,7 +486,7 @@ static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value
             en_array->values = make_obj_arr_in(encoded_value, size, pool);
             for (int i = 0; i < en_array->size; ++i) {
                 encoded_value *v = &en_array->values[i];
-                parse_dex_encoded_value_depth(dex, v, depth + 1);
+                parse_dex_encoded_value(dex, v, depth + 1);
             }
             value->value = (u1*)en_array;
             break;
@@ -512,7 +507,7 @@ static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value
                 annotation_element *element = &anno->elements[i];
                 element->name_idx = read_unsigned_leb128(dex);
                 element->value = make_obj_in(encoded_value, pool);
-                parse_dex_encoded_value_depth(dex, element->value, depth + 1);
+                parse_dex_encoded_value(dex, element->value, depth + 1);
             }
             value->value = (u1*)anno;
             break;
@@ -547,7 +542,7 @@ static encoded_array *parse_dex_encoded_array(jd_meta_dex *dex)
     }
     array->values = make_obj_arr_in(encoded_value, array->size, pool);
     for (u4 i = 0; i < array->size; ++i)
-        parse_dex_encoded_value_depth(dex, &array->values[i], 1);
+        parse_dex_encoded_value(dex, &array->values[i], 1);
     return array;
 }
 
@@ -647,7 +642,7 @@ static void parse_dex_annotation_off_item(jd_meta_dex *dex,
         element->name_idx = read_unsigned_leb128(dex);
         element->value = make_obj_in(encoded_value, dex->pool);
 
-        parse_dex_encoded_value_depth(dex, element->value, 1);
+        parse_dex_encoded_value(dex, element->value, 1);
     }
 
 }
@@ -1170,7 +1165,7 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
     cdata->virtual_methods_size    = read_unsigned_leb128(dex);
     /* 每个成员在流中至少占 2 字节，先确认计数与文件剩余字节相符。 */
     if (!dex_count_ok_at(dex, dex->bin->cur_off,
-                         cdata->static_fields_size + cdata->instance_fields_size +
+                         (u8) cdata->static_fields_size + cdata->instance_fields_size +
                          cdata->direct_methods_size + cdata->virtual_methods_size, 2)) {
         dex_mark_invalid_reason(dex, "class_data counts exceed the file");
         return;
