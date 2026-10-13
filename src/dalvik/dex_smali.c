@@ -1247,6 +1247,9 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         smali_flags(stream, flags);
         if (efield->access_flags & ACC_DEX_ENUM)
             fputs(" enum", stream);
+        /* 字段位 0x80 是 transient；方法位 0x80 才是 varargs。 */
+        if (efield->access_flags & ACC_TRANSIENT)
+            fputs(" transient", stream);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         if (cf->static_values != NULL && i < (int) cf->static_values->size) {
             fputs(" = ", stream);
@@ -1265,6 +1268,9 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         smali_flags(stream, flags);
         if (efield->access_flags & ACC_DEX_ENUM)
             fputs(" enum", stream);
+        /* 字段位 0x80 是 transient；方法位 0x80 才是 varargs。 */
+        if (efield->access_flags & ACC_TRANSIENT)
+            fputs(" transient", stream);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         fputc('\n', stream);
         smali_write_field_annotations(stream, dex, cf, efield->field_id);
@@ -1290,9 +1296,11 @@ static void smali_write_class_def(jd_meta_dex *dex,
     if (cf->access_flags & ACC_DEX_PROTECTED)
         fputs(" protected", stream);
     fprintf(stream, " %s\n", class_name);
-    fprintf(stream, ".super %s\n", super_name);
-
     const u4 kNoIndex = 0xFFFFFFFF;
+    /* 根类的 superclass_idx 是 NO_INDEX，参考实现在这种情况下不写 .super 行。 */
+    if (cf->superclass_idx != kNoIndex)
+        fprintf(stream, ".super %s\n", super_name);
+
     if (cf->source_file_idx != kNoIndex &&
         cf->source_file_idx < dex->header->string_ids_size) {
         fprintf(stream, ".source ");
