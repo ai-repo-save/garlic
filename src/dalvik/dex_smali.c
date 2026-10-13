@@ -1121,6 +1121,11 @@ static void smali_method_defination(jd_meta_dex *dex,
     smali_flags(_smali_stream(stream), access_flags);
     if (m->access_flags & ACC_DEX_SYNTHETIC)
         fputs(" synthetic", _smali_stream(stream));
+    /* Method bit 0x40 is bridge, not the field volatile flag. */
+    if (m->access_flags & ACC_BRIDGE)
+        fputs(" bridge", _smali_stream(stream));
+    if (m->access_flags & ACC_DEX_VARARGS)
+        fputs(" varargs", _smali_stream(stream));
 
     // <init> and <clinit> are marked as constructors, which is how smali
     // tells them apart from a method that merely happens to be called that -
@@ -1179,6 +1184,8 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         string flags = str_join(list);
         fprintf(stream, "\n.field ");
         smali_flags(stream, flags);
+        if (efield->access_flags & ACC_DEX_ENUM)
+            fputs(" enum", stream);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         if (cf->static_values != NULL && i < (int) cf->static_values->size) {
             fputs(" = ", stream);
@@ -1195,6 +1202,8 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         string flags = str_join(list);
         fprintf(stream, "\n.field ");
         smali_flags(stream, flags);
+        if (efield->access_flags & ACC_DEX_ENUM)
+            fputs(" enum", stream);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         fputc('\n', stream);
         smali_write_field_annotations(stream, dex, cf, efield->field_id);
@@ -1215,6 +1224,10 @@ static void smali_write_class_def(jd_meta_dex *dex,
 
     fprintf(stream, ".class ");
     smali_class_flags(stream, cf_access_flags);
+    if (cf->access_flags & ACC_DEX_PRIVATE)
+        fputs(" private", stream);
+    if (cf->access_flags & ACC_DEX_PROTECTED)
+        fputs(" protected", stream);
     fprintf(stream, " %s\n", class_name);
     fprintf(stream, ".super %s\n", super_name);
 
