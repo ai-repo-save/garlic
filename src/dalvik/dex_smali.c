@@ -945,6 +945,39 @@ static bool smali_payload_ref_broken(const dex_code_item *code,
     return smali_labels_find(labels, target) == NULL;
 }
 
+/* 指令引用的索引必须落在对应的表内。越界时写出引用会读到表外内存，参考实现改为输出
+ * nop，这里采用同一处理。45cc/4rcc 的 proto 是附加引用，位置与其他格式不同。 */
+static bool smali_ref_broken(const jd_meta_dex *dex, const dex_code_item *code, int i)
+{
+    u1 op = code->insns[i] & 0xFF;
+    smali_ref_kind kind = smali_ref_of(op);
+    if (kind == REF_NONE)
+        return false;
+
+    u4 index = code->insns[i + 1];
+    if (dex_opcode_fmt(op) == kFmt31c)
+        index = smali_u32_at(code, i + 1);
+
+    switch (kind) {
+        case REF_STRING:
+            return index >= dex->header->string_ids_size;
+        case REF_TYPE:
+            return index >= dex->header->type_ids_size;
+        case REF_FIELD:
+            return index >= dex->header->field_ids_size;
+        case REF_METHOD:
+            return index >= dex->header->method_ids_size;
+        case REF_PROTO:
+            return index >= dex->header->proto_ids_size;
+        case REF_HANDLE:
+            return index >= dex->method_handles_size;
+        case REF_CALLSITE:
+            return index >= dex->call_sites_size;
+        default:
+            return false;
+    }
+}
+
 static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code,
                                      smali_label_table *labels,
                                      smali_payload_table *payloads,
@@ -965,16 +998,23 @@ static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code
         if (label != NULL)
             fprintf(stream, "  :%s\n", label);
 
+        /* 未知操作码与无法解析的 payload 目标一样，退化为 nop：直接写出会引用不存在
+         * 的引用或标签，参考实现同样以 nop 代替。 */
+        int len = dex_opcode_len(op);
+        bool unknown_opcode = len <= 0;
+        if (unknown_opcode)
+            len = 1;
         bool broken_payload = smali_payload_ref_broken(code, labels, payloads, i);
+        bool broken_ref = !unknown_opcode && smali_ref_broken(dex, code, i);
         smali_write_debug_at(stream, dex, code, (u4) i, debug_cursor);
-        fprintf(stream, "    %s", broken_payload ? "nop" : dex_opcode_name(op));
-        if (!broken_payload)
+        if (unknown_opcode || broken_payload || broken_ref)
+            fputs("    nop", stream);
+        else {
+            fprintf(stream, "    %s", dex_opcode_name(op));
             smali_write_operands(stream, dex, code, i, labels, payloads);
+        }
         fputc('\n', stream);
 
-        int len = dex_opcode_len(op);
-        if (len <= 0)
-            len = 1;
         i += len;
     }
 

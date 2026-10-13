@@ -278,6 +278,12 @@ static void parse_dex_type_ids(jd_meta_dex *dex)
         return;
     }
     dex->type_ids = (dex_type_id *) (dex->bin->buffer + dex->header->type_ids_off);
+    for (u4 i = 0; i < dex->header->type_ids_size; ++i) {
+        if (dex->type_ids[i].descriptor_idx >= dex->header->string_ids_size) {
+            dex_mark_invalid_reason(dex, "type descriptor outside string_ids");
+            return;
+        }
+    }
 }
 
 static void parse_dex_proto_ids(jd_meta_dex *dex)
@@ -301,6 +307,14 @@ static void parse_dex_proto_ids(jd_meta_dex *dex)
         jdex_read4(dex, &proto_id->shorty_idx);
         jdex_read4(dex, &proto_id->return_type_idx);
         jdex_read4(dex, &proto_id->parameters_off);
+        if (proto_id->shorty_idx >= dex->header->string_ids_size) {
+            dex_mark_invalid_reason(dex, "proto shorty outside string_ids");
+            return;
+        }
+        if (proto_id->return_type_idx >= dex->header->type_ids_size) {
+            dex_mark_invalid_reason(dex, "proto return type outside type_ids");
+            return;
+        }
     }
 
     for (int i = 0; i < header->proto_ids_size; ++i)
@@ -340,10 +354,25 @@ static void parse_dex_field_ids(jd_meta_dex *dex)
     if (dex_invalid(dex))
         return;
     if (!dex_table_ok(dex, dex->header->field_ids_off, dex->header->field_ids_size, sizeof(dex_field_id))) {
-        dex_mark_invalid(dex);
+        dex_mark_invalid_reason(dex, "field_ids outside the file");
         return;
     }
     dex->field_ids = (dex_field_id *) (dex->bin->buffer + dex->header->field_ids_off);
+    for (u4 i = 0; i < dex->header->field_ids_size; ++i) {
+        dex_field_id *field_id = &dex->field_ids[i];
+        if (field_id->class_idx >= dex->header->type_ids_size) {
+            dex_mark_invalid_reason(dex, "field class outside type_ids");
+            return;
+        }
+        if (field_id->type_idx >= dex->header->type_ids_size) {
+            dex_mark_invalid_reason(dex, "field type outside type_ids");
+            return;
+        }
+        if (field_id->name_idx >= dex->header->string_ids_size) {
+            dex_mark_invalid_reason(dex, "field name outside string_ids");
+            return;
+        }
+    }
 }
 
 static void parse_dex_method_ids(jd_meta_dex *dex)
@@ -351,10 +380,25 @@ static void parse_dex_method_ids(jd_meta_dex *dex)
     if (dex_invalid(dex))
         return;
     if (!dex_table_ok(dex, dex->header->method_ids_off, dex->header->method_ids_size, sizeof(dex_method_id))) {
-        dex_mark_invalid(dex);
+        dex_mark_invalid_reason(dex, "method_ids outside the file");
         return;
     }
     dex->method_ids = (dex_method_id *) (dex->bin->buffer + dex->header->method_ids_off);
+    for (u4 i = 0; i < dex->header->method_ids_size; ++i) {
+        dex_method_id *method_id = &dex->method_ids[i];
+        if (method_id->class_idx >= dex->header->type_ids_size) {
+            dex_mark_invalid_reason(dex, "method class outside type_ids");
+            return;
+        }
+        if (method_id->proto_idx >= dex->header->proto_ids_size) {
+            dex_mark_invalid_reason(dex, "method proto outside proto_ids");
+            return;
+        }
+        if (method_id->name_idx >= dex->header->string_ids_size) {
+            dex_mark_invalid_reason(dex, "method name outside string_ids");
+            return;
+        }
+    }
 }
 
 static void parse_dex_class_interfaces(jd_meta_dex *dex, dex_class_def *cdef)
@@ -1011,6 +1055,10 @@ static void parse_dex_code_item(jd_meta_dex *dex, encoded_method *em)
     jdex_read4(dex, &code->debug_info_off);
     jdex_read4(dex, &code->insns_size);
 
+    if (code->debug_info_off != 0 && !dex_range_ok(dex, code->debug_info_off, 1)) {
+        dex_mark_invalid_reason(dex, "debug_info outside the file");
+        return;
+    }
     if (!dex_range_ok(dex, dex->bin->cur_off, sizeof(u2) * (u8) code->insns_size)) {
         dex_mark_invalid_reason(dex, "insns outside the file");
         code->insns = NULL;

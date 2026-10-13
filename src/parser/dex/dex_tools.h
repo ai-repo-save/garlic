@@ -16,7 +16,17 @@
 static inline bool dex_encoded_method_is_lambda(jd_meta_dex *meta,
                                                 encoded_method *em)
 {
+    if (meta->header == NULL || em->method_id >= meta->header->method_ids_size) {
+        if (meta->bin != NULL)
+            meta->bin->overrun = true;
+        return false;
+    }
     dex_method_id method_id = meta->method_ids[em->method_id];
+    if (method_id.name_idx >= meta->header->string_ids_size) {
+        if (meta->bin != NULL)
+            meta->bin->overrun = true;
+        return false;
+    }
     string name = meta->strings[method_id.name_idx].data;
     return str_contains(name, "lambda$") &&
             (em->access_flags & ACC_DEX_SYNTHETIC) != 0;
