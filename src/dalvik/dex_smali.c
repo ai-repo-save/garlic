@@ -926,6 +926,25 @@ static void smali_write_operands(FILE *stream, jd_meta_dex *dex,
     }
 }
 
+/* 31t 指令（fill-array-data / packed-switch / sparse-switch）的目标必须是本 code_item
+ * 内的 payload。目标无法解析时写出 switch 会引用未定义标签，因此要在写助记符前判定，
+ * 并按参考实现的做法退化为 nop。 */
+static bool smali_payload_ref_broken(const dex_code_item *code,
+                                     smali_label_table *labels,
+                                     smali_payload_table *payloads,
+                                     int i)
+{
+    u1 op = code->insns[i] & 0xFF;
+    if (op != DEX_INS_FILL_ARRAY_DATA && op != DEX_INS_PACKED_SWITCH &&
+        op != DEX_INS_SPARSE_SWITCH)
+        return false;
+
+    u4 target = (u4) smali_payload_target(code, i);
+    if (smali_payload_label_for(payloads, (u4) i, target) != NULL)
+        return false;
+    return smali_labels_find(labels, target) == NULL;
+}
+
 static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code,
                                      smali_label_table *labels,
                                      smali_payload_table *payloads,
@@ -946,9 +965,11 @@ static void smali_write_instructions(jd_meta_dex *dex, const dex_code_item *code
         if (label != NULL)
             fprintf(stream, "  :%s\n", label);
 
+        bool broken_payload = smali_payload_ref_broken(code, labels, payloads, i);
         smali_write_debug_at(stream, dex, code, (u4) i, debug_cursor);
-        fprintf(stream, "    %s", dex_opcode_name(op));
-        smali_write_operands(stream, dex, code, i, labels, payloads);
+        fprintf(stream, "    %s", broken_payload ? "nop" : dex_opcode_name(op));
+        if (!broken_payload)
+            smali_write_operands(stream, dex, code, i, labels, payloads);
         fputc('\n', stream);
 
         int len = dex_opcode_len(op);
