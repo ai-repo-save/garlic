@@ -95,11 +95,15 @@ static bool dex_range_ok(jd_meta_dex *dex, u8 offset, u8 length)
     return true;
 }
 
-/* size 为 0 的表允许 offset 为 0；其余情况要求整张表落在文件内。 */
+/* size 为 0 的表允许 offset 为 0；其余情况要求整张表落在文件内并按 4 字节对齐。
+ * 对齐是规范要求：解析器把表起始地址直接转换为结构体指针，未对齐访问是未定义行为
+ * （ARM 上会出错），参考实现同样拒绝未对齐的表。 */
 static bool dex_table_ok(jd_meta_dex *dex, u4 offset, u4 size, u4 stride)
 {
     if (size == 0)
         return true;
+    if (offset % 4 != 0)
+        return false;
     return dex_range_ok(dex, offset, (u8) size * stride);
 }
 
@@ -157,20 +161,20 @@ static void parse_dex_links(jd_meta_dex *dex)
 
 static void parse_dex_map_list(jd_meta_dex *dex)
 {
-    if (dex_invalid(dex)) {
-        dex->maps = NULL;
+    if (dex_invalid(dex))
         return;
-    }
     u4 map_off = dex->header->map_off;
     if (map_off == 0 || !dex_range_ok(dex, map_off, 4)) {
         dex_mark_invalid(dex);
-        dex->maps = NULL;
         return;
     }
-    dex->maps = (dex_map_list *) (dex->bin->buffer + map_off);
-    if (!dex_range_ok(dex, (u8) map_off + 4, (u8) dex->maps->size * sizeof(dex_map_item))) {
+    /* map_list 只做校验：map_off 只保证 4 字节对齐，不能按含指针的结构体访问。 */
+    setup_current_offset(dex, map_off);
+    u4 size = 0;
+    jdex_read4(dex, &size);
+    if (dex_invalid(dex) ||
+        !dex_range_ok(dex, (u8) map_off + 4, (u8) size * sizeof(dex_map_item))) {
         dex_mark_invalid_reason(dex, "map_list outside the file");
-        dex->maps = NULL;
     }
 }
 
@@ -428,8 +432,22 @@ static void parse_dex_class_interfaces(jd_meta_dex *dex, dex_class_def *cdef)
     jdex_read(dex, interfaces->list, item_size*size);
 }
 
+/* 嵌套深度上限：每层至少消耗 1 字节，深嵌套会让递归耗尽栈。 */
+#define DEX_MAX_ENCODED_DEPTH 32
+
+static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value, int depth);
+
 static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
 {
+    parse_dex_encoded_value_depth(dex, value, 0);
+}
+
+static void parse_dex_encoded_value_depth(jd_meta_dex *dex, encoded_value *value, int depth)
+{
+    if (depth > DEX_MAX_ENCODED_DEPTH) {
+        dex_mark_invalid_reason(dex, "encoded_value nesting too deep");
+        return;
+    }
     mem_pool *pool = dex->pool;
     u4 size = 0;
     jdex_read1(dex, &value->strict_value);
@@ -464,11 +482,16 @@ static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
         case kDexAnnotationArray: {
             encoded_array *en_array = make_obj_in(encoded_array, pool);
             size = read_unsigned_leb128(dex);
+            if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 1)) {
+                dex_mark_invalid_reason(dex, "encoded_array size exceeds the file");
+                value->value = NULL;
+                return;
+            }
             en_array->size = size;
             en_array->values = make_obj_arr_in(encoded_value, size, pool);
             for (int i = 0; i < en_array->size; ++i) {
                 encoded_value *v = &en_array->values[i];
-                parse_dex_encoded_value(dex, v);
+                parse_dex_encoded_value_depth(dex, v, depth + 1);
             }
             value->value = (u1*)en_array;
             break;
@@ -478,13 +501,18 @@ static void parse_dex_encoded_value(jd_meta_dex *dex, encoded_value *value)
             anno->type_idx = read_unsigned_leb128(dex);
 
             size = read_unsigned_leb128(dex);
+            if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 2)) {
+                dex_mark_invalid_reason(dex, "annotation size exceeds the file");
+                value->value = NULL;
+                return;
+            }
             anno->size = size;
             anno->elements = make_obj_arr_in(annotation_element, size, pool);
             for (int i = 0; i < anno->size; ++i) {
                 annotation_element *element = &anno->elements[i];
                 element->name_idx = read_unsigned_leb128(dex);
                 element->value = make_obj_in(encoded_value, pool);
-                parse_dex_encoded_value(dex, element->value);
+                parse_dex_encoded_value_depth(dex, element->value, depth + 1);
             }
             value->value = (u1*)anno;
             break;
@@ -511,9 +539,15 @@ static encoded_array *parse_dex_encoded_array(jd_meta_dex *dex)
         array->values = NULL;
         return array;
     }
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, array->size, 1)) {
+        dex_mark_invalid_reason(dex, "encoded_array size exceeds the file");
+        array->size = 0;
+        array->values = NULL;
+        return array;
+    }
     array->values = make_obj_arr_in(encoded_value, array->size, pool);
     for (u4 i = 0; i < array->size; ++i)
-        parse_dex_encoded_value(dex, &array->values[i]);
+        parse_dex_encoded_value_depth(dex, &array->values[i], 1);
     return array;
 }
 
@@ -547,6 +581,10 @@ static void parse_dex_method_handles(jd_meta_dex *dex)
     u4 size = 0, off = 0;
     if (!dex_map_find(dex, kDexTypeMethodHandleItem, &size, &off) || size == 0)
         return;
+    if (!dex_count_ok_at(dex, off, size, 8)) {
+        dex_mark_invalid_reason(dex, "method_handles section exceeds the file");
+        return;
+    }
     dex->method_handles = make_obj_arr_in(dex_method_handle_item, size, dex->pool);
     dex->method_handles_size = size;
     setup_current_offset(dex, off);
@@ -566,6 +604,10 @@ static void parse_dex_call_sites(jd_meta_dex *dex)
     u4 size = 0, off = 0;
     if (!dex_map_find(dex, kDexTypeCallSiteIdItem, &size, &off) || size == 0)
         return;
+    if (!dex_count_ok_at(dex, off, size, 4)) {
+        dex_mark_invalid_reason(dex, "call_sites section exceeds the file");
+        return;
+    }
     dex->call_sites = make_obj_arr_in(encoded_array, size, dex->pool);
     dex->call_sites_size = size;
     for (u4 i = 0; i < size; ++i) {
@@ -594,6 +636,10 @@ static void parse_dex_annotation_off_item(jd_meta_dex *dex,
     encoded_annotation *eanno = item->encoded_annotation;
     eanno->type_idx = read_unsigned_leb128(dex);
     size = read_unsigned_leb128(dex);
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 2)) {
+        dex_mark_invalid_reason(dex, "annotation size exceeds the file");
+        return;
+    }
     eanno->size = size;
     eanno->elements = make_obj_arr_in(annotation_element, size, pool);
     for (int i = 0; i < eanno->size; ++i) {
@@ -601,7 +647,7 @@ static void parse_dex_annotation_off_item(jd_meta_dex *dex,
         element->name_idx = read_unsigned_leb128(dex);
         element->value = make_obj_in(encoded_value, dex->pool);
 
-        parse_dex_encoded_value(dex, element->value);
+        parse_dex_encoded_value_depth(dex, element->value, 1);
     }
 
 }
@@ -678,6 +724,10 @@ static void parse_dex_class_defs_anos(jd_meta_dex *dex, dex_class_def *cf)
 
     size = dict->fields_size;
     if (size > 0) {
+        if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 8)) {
+            dex_mark_invalid_reason(dex, "annotated fields exceed the file");
+            return;
+        }
         dict->field_annotations = make_obj_arr_in(field_annotation, size, pool);
         for (int j = 0; j < size; ++j) {
             field_annotation *fa = &dict->field_annotations[j];
@@ -688,6 +738,10 @@ static void parse_dex_class_defs_anos(jd_meta_dex *dex, dex_class_def *cf)
 
     size = dict->methods_size;
     if (size > 0) {
+        if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 8)) {
+            dex_mark_invalid_reason(dex, "annotated methods exceed the file");
+            return;
+        }
         dict->method_annotations = make_obj_arr_in(meth_ano, size, pool);
         for (int j = 0; j < size; ++j) {
             meth_ano *ma = &dict->method_annotations[j];
@@ -698,6 +752,10 @@ static void parse_dex_class_defs_anos(jd_meta_dex *dex, dex_class_def *cf)
 
     size = dict->parameters_size;
     if (size > 0) {
+        if (!dex_count_ok_at(dex, dex->bin->cur_off, size, 8)) {
+            dex_mark_invalid_reason(dex, "annotated parameters exceed the file");
+            return;
+        }
         dict->parameter_annotations = make_obj_arr_in(param_ano, size, pool);
         for (int j = 0; j < size; ++j) {
             parameter_annotation *pa = &dict->parameter_annotations[j];
@@ -841,6 +899,11 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
     dex_debug_info_item *debug_info = code->debug_info;
     debug_info->line_start = read_unsigned_leb128(dex);
     debug_info->parameters_size = read_unsigned_leb128(dex);
+    /* 每个参数在流中至少占 1 字节，先确认计数与文件剩余字节相符。 */
+    if (!dex_count_ok_at(dex, dex->bin->cur_off, debug_info->parameters_size, 0)) {
+        dex_mark_invalid_reason(dex, "debug parameters_size exceeds the file");
+        return;
+    }
     debug_info->parameter_name = make_obj_arr_in(u4, debug_info->parameters_size, pool);
 
     u4 current_offset = dex->bin->cur_off;
@@ -852,13 +915,18 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
 
     u2 dbg_size = 0;
 
+    /* 每个参数是 uleb128p1，至少占 1 字节；上面的计数检查保证游标不会越过缓冲末尾。 */
     for (int i = 0; i < debug_info->parameters_size; ++i) {
         read_unsigned_leb128(dex);
+        if (dex_invalid(dex))
+            return;
     }
     dbg_size += debug_info->parameters_size;
-    u1 dbg_opcode;
+    /* 读到缓冲末尾时 jd_bin_read 不写入目标，必须按读取失败退出，否则本循环不会结束。 */
+    u1 dbg_opcode = DBG_END_SEQUENCE;
     while (1) {
-        jdex_read1(dex, &dbg_opcode);
+        if (jdex_read1(dex, &dbg_opcode) == 0 || dex_invalid(dex))
+            return;
         if (dbg_opcode == DBG_END_SEQUENCE)
             break;
         switch (dbg_opcode) {
@@ -928,11 +996,15 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
     u4 address = 0;
     s4 line = (s4) debug_info->line_start;
     while (1) {
-        jdex_read1(dex, &dbg_opcode);
+        /* 同第一趟：读取失败必须退出；条目数超过第一趟的计数说明流被截断。 */
+        if (jdex_read1(dex, &dbg_opcode) == 0 || dex_invalid(dex))
+            break;
         if (dbg_opcode == DBG_END_SEQUENCE)
             break;
-        if (itor >= dbg_size)
+        if (itor >= dbg_size) {
+            dex_mark_invalid_reason(dex, "debug_info has more items than the first pass counted");
             break;
+        }
         switch (dbg_opcode) {
             case DBG_ADVANCE_PC: {
                 u4 addr_diff = read_unsigned_leb128(dex);

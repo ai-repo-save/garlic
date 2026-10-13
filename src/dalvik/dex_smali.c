@@ -955,8 +955,13 @@ static bool smali_ref_broken(const jd_meta_dex *dex, const dex_code_item *code, 
         return false;
 
     u4 index = code->insns[i + 1];
-    if (dex_opcode_fmt(op) == kFmt31c)
+    dex_instruction_format fmt = dex_opcode_fmt(op);
+    if (fmt == kFmt31c)
         index = smali_u32_at(code, i + 1);
+    /* 45cc/4rcc 还有第二个引用（proto），位置与其他格式不同。 */
+    if ((fmt == kFmt45cc || fmt == kFmt4rcc) &&
+        code->insns[i + 3] >= dex->header->proto_ids_size)
+        return true;
 
     switch (kind) {
         case REF_STRING:

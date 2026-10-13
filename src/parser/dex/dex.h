@@ -235,11 +235,6 @@ typedef struct {
 } dex_map_item;
 
 typedef struct {
-    u4  size;
-    dex_map_item *list;
-} dex_map_list;
-
-typedef struct {
     u4 string_data_off;
 } dex_string_id;
 
@@ -534,7 +529,6 @@ typedef struct jd_meta_dex {
 
     dex_link *links;
 
-    dex_map_list *maps;
 
     dex_string_id *string_ids;
 
