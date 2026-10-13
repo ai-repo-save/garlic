@@ -19,7 +19,8 @@
 int read_unsigned_leb128(jd_meta_dex *dex)
 {
     u1 uleb = 0;
-    int result = 0;
+    /* 累加用无符号：第 5 字节会左移到第 28 位，有符号移位是未定义行为。 */
+    u4 result = 0;
 
     if (jdex_read1(dex, &uleb) == 0) return 0;
     result = uleb;
@@ -34,30 +35,31 @@ int read_unsigned_leb128(jd_meta_dex *dex)
                 result |= (uleb & 0x7f) << 21;
                 if (uleb > 0x7f) {
                     uleb = 0; if (jdex_read1(dex, &uleb) == 0) return result;
-                    result |= uleb << 28;
+                    result |= (u4) uleb << 28;
                 }
             }
         }
     }
-    return result;
+    return (int) result;
 }
 
 int read_signed_leb128(jd_meta_dex *dex)
 {
-    int result = 0;
+    u4 result = 0;
     int shift = 0;
     u1 byte = 0;
 
     do {
         if (jdex_read1(dex, &byte) == 0)
-            return result;
-        result |= (byte & 0x7f) << shift;
+            return (int) result;
+        result |= (u4) (byte & 0x7f) << shift;
         shift += 7;
     } while ((byte & 0x80) != 0 && shift < 32);
 
+    /* 最高有效位已置位时按符号位扩展，仍在无符号域内构造。 */
     if (shift < 32 && (byte & 0x40) != 0)
-        result |= -(1 << shift);
-    return result;
+        result |= ~(u4) 0 << shift;
+    return (int) result;
 }
 
 static void setup_current_offset(jd_meta_dex *dex, size_t offset)
