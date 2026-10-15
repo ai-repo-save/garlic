@@ -318,6 +318,15 @@ if (GARLIC_SMALI_DECODE_TEST)
             $<TARGET_FILE:garlic>)
 endif ()
 
+option(GARLIC_DEX_MUTF8_TEST "Enable the DEX MUTF-8 string boundary integration test" OFF)
+if (GARLIC_DEX_MUTF8_TEST)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(NAME dex_mutf8_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/dex_mutf8_integration.py
+            $<TARGET_FILE:garlic>)
+endif ()
+
 # Explicit local-toolchain regression; no SDK downloads or full-APK analysis.
 option(GARLIC_DEX_RENDERING_TEST "Enable the DEX Java rendering integration test" OFF)
 if (GARLIC_DEX_RENDERING_TEST)

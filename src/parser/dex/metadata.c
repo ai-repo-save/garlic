@@ -194,7 +194,7 @@ static int dex_string_byte_size(jd_meta_dex *dex, uint32_t utf16_size)
             dex_mark_invalid(dex);
             return real;
         }
-        if (c > 0 && c < 127) {
+        if (c > 0 && c < 0x80) {
         }
         else if (c >= 0xE0) {
             if (!dex_range_ok(dex, (u8) real + dex->bin->cur_off, 3)) {

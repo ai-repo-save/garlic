@@ -51,3 +51,26 @@ ctest --test-dir build -R '^smali_decode_integration$' --output-on-failure
 
 This option defaults to OFF. It requires only local Python and the built Garlic;
 all DEX files are temporary, with no JDK, SDK, network, or device dependency.
+
+## DEX MUTF-8 string boundaries
+
+`dex_mutf8_integration.py` hand-builds a minimal DEX035 class and reads its source
+name through CLI smali. Explicit bytes and expected escapes follow the official
+[DEX MUTF-8](https://source.android.com/docs/core/runtime/dex-format#mutf-8) and
+[string_data_item](https://source.android.com/docs/core/runtime/dex-format#string-data-item)
+rules, not Garlic output. Cases cover empty strings, encoded NUL, U+0001,
+U+007E/U+007F/U+0080, two-/three-byte boundaries, surrogate boundaries, and the
+supplementary minimum/maximum (two UTF-16 code units). Surrounding sentinels
+check complete consumption. Early raw NUL, bare continuation bytes, and UTF-16
+length mismatches must still be rejected. This is a targeted regression, not a
+complete malformed-MUTF-8 verifier test suite.
+
+```sh
+cmake -S . -B build -DGARLIC_DEX_MUTF8_TEST=ON
+cmake --build build --target garlic
+ctest --test-dir build -R '^dex_mutf8_integration$' --output-on-failure
+# Or: python3 tests/dex_mutf8_integration.py build/garlic
+```
+
+The option defaults to OFF and uses only Python's standard library and the built
+CLI. Generated DEX files remain temporary; no APK, JDK, SDK, or network is needed.
