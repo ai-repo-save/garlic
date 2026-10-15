@@ -9,11 +9,11 @@ are two UTF-16 surrogates, and utf16_size counts code units, not encoded bytes.
 All bytes/expected escapes below are explicit, not encoded by Garlic or an SDK.
 """
 
+import argparse
 import hashlib
 from pathlib import Path
 import struct
 import subprocess
-import sys
 import tempfile
 import zlib
 
@@ -85,7 +85,9 @@ def dex_fixture(payload, utf16_size):
 
 
 def main():
-    binary = str(Path(sys.argv[1]).resolve())
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser.add_argument("binary", type=Path, help="Garlic executable to verify")
+    binary = str(parser.parse_args().binary.resolve())
     valid = [("empty", b"", 0, "")]
     # Sentinels detect truncation or accidental consumption of the following byte.
     valid += [(name, b"A" + raw + b"Z", size + 2, "A" + text + "Z")
