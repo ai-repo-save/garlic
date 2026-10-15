@@ -76,9 +76,6 @@ byte-for-byte identical to a separate query against its defining DEX:
 - `dex_smali_lookup_lifetime`, `dex_mutf8_integration`,
   `smali_decode_integration`, `dex_rendering_integration`, and
   `mcp_request_lifetime` pass with the rebuilt binary.
-- `smali_payload_integration` still fails on both the saved baseline binary and
-  the fixed binary: its fixture has return type index 2 with only two type IDs
-  (`proto return type outside type_ids`). That fixture is outside this fix.
 - A separate Debug build with `-g -O1 -fno-lto -fsanitize=address
   -fno-omit-frame-pointer` also passes the same four fixture scenarios with
   `ASAN_OPTIONS=detect_leaks=1:halt_on_error=1`, without the `RLIMIT_AS` cap

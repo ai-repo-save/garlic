@@ -2,14 +2,15 @@
 
 Independent authority: Dalvik bytecode defines packed-switch targets relative to
 each switch instruction, and a zero element width is not a representable array
-payload width. The code units are hand encoded. The fixture is disassembled,
-not executed.
+payload width. The code units are hand encoded. Type/prototype tables and
+static-method lists are well-formed; the zero array width is deliberately
+malformed. The fixture is disassembled, not executed.
 """
 
+import argparse
 import hashlib
 import struct
 import subprocess
-import sys
 import tempfile
 import zlib
 from pathlib import Path
@@ -29,9 +30,11 @@ def uleb128(value):
 
 def dex_with_code(class_name, method_name, code_units):
     strings = [f"L{class_name};", "Ljava/lang/Object;", "V", method_name]
+    type_string_indices = (0, 1, 2)
+    type_count = len(type_string_indices)
     string_ids_off = 112
     type_ids_off = string_ids_off + 4 * len(strings)
-    proto_ids_off = type_ids_off + 4 * 2
+    proto_ids_off = type_ids_off + 4 * type_count
     method_ids_off = proto_ids_off + 12
     class_defs_off = method_ids_off + 8
     data_off = class_defs_off + 32
@@ -46,14 +49,14 @@ def dex_with_code(class_name, method_name, code_units):
     data.extend(struct.pack("<HHHHII", 1, 0, 0, 0, 0, len(code_units)))
     data.extend(struct.pack(f"<{len(code_units)}H", *code_units))
     class_data_off = len(data)
-    data.extend(b"\0\0\0\1\0\x09" + uleb128(code_off))
+    data.extend(b"\0\0\1\0\0\x09" + uleb128(code_off))
     while len(data) % 4:
         data.append(0)
     map_off = len(data)
     entries = [
         (0x0000, 1, 0),
         (0x0001, len(strings), string_ids_off),
-        (0x0002, 2, type_ids_off),
+        (0x0002, type_count, type_ids_off),
         (0x0003, 1, proto_ids_off),
         (0x0005, 1, method_ids_off),
         (0x0006, 1, class_defs_off),
@@ -78,7 +81,7 @@ def dex_with_code(class_name, method_name, code_units):
         map_off,
         len(strings),
         string_ids_off,
-        2,
+        type_count,
         type_ids_off,
         1,
         proto_ids_off,
@@ -92,7 +95,7 @@ def dex_with_code(class_name, method_name, code_units):
         data_off,
     )
     struct.pack_into("<4I", data, string_ids_off, *string_offsets)
-    struct.pack_into("<2I", data, type_ids_off, 0, 1)
+    struct.pack_into(f"<{type_count}I", data, type_ids_off, *type_string_indices)
     struct.pack_into("<3I", data, proto_ids_off, 2, 2, 0)
     struct.pack_into("<HHI", data, method_ids_off, 0, 0, 3)
     struct.pack_into("<8I", data, class_defs_off, 0, 1, 1, 0, 0xFFFFFFFF, 0, class_data_off, 0)
@@ -160,7 +163,9 @@ def check_zero_array_width(binary, directory):
 
 
 def main():
-    binary = str(Path(sys.argv[1]).resolve())
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n", 1)[0])
+    parser.add_argument("binary", type=Path, help="Garlic executable to verify")
+    binary = str(parser.parse_args().binary.resolve())
     with tempfile.TemporaryDirectory(prefix="garlic-smali-payload-") as directory:
         check_shared_switch(binary, directory)
         check_zero_array_width(binary, directory)

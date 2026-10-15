@@ -47,9 +47,6 @@ length, or terminator checks.
   returns the same class through MCP.
 - `dex_mutf8_integration`, `smali_decode_integration`,
   `dex_rendering_integration`, and `mcp_request_lifetime` pass.
-- Existing `smali_payload_integration` fails both with the original condition
-  rebuilt from baseline and with the fix: its fixture uses return type index 2
-  with only two type IDs (`proto return type outside type_ids`). Left unchanged.
 - Reviewed neighboring MUTF-8 scanning and related `0x7f`/`127` comparisons:
   no second instance of this one-byte acceptance error found. Smali's printable
   ASCII upper bound intentionally escapes U+007F and is not an acceptance check.

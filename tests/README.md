@@ -41,12 +41,14 @@ Branch labels, exception metadata, and other opcodes require separate validation
 `smali_payload_integration.py` uses the same option and checks two hand-encoded
 edge cases: a packed-switch payload shared by two instructions must keep each
 instruction's relative targets, and an array payload with element width 0 must
-be rendered as an empty `.array-data 1` block.
+be rendered as an empty `.array-data 1` block. The zero width is intentionally
+malformed; the shared DEX type/prototype tables and direct-method list are
+well-formed so both cases reach instruction rendering.
 
 ```sh
 cmake -S . -B build -DGARLIC_SMALI_DECODE_TEST=ON
 cmake --build build
-ctest --test-dir build -R '^smali_decode_integration$' --output-on-failure
+ctest --test-dir build -R '^smali_(decode|payload)_integration$' --output-on-failure
 ```
 
 This option defaults to OFF. It requires only local Python and the built Garlic;
