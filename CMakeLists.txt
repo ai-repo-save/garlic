@@ -318,6 +318,19 @@ if (GARLIC_SMALI_DECODE_TEST)
             $<TARGET_FILE:garlic>)
 endif ()
 
+option(GARLIC_SMALI_LOOKUP_LIFETIME_TEST "Enable the Linux CLI smali lookup lifetime regression" OFF)
+if (GARLIC_SMALI_LOOKUP_LIFETIME_TEST)
+    if (NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(FATAL_ERROR "The smali lookup lifetime regression requires Linux RLIMIT_AS")
+    endif ()
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(NAME dex_smali_lookup_lifetime
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/e2e/dex_smali_lookup_lifetime.py
+            $<TARGET_FILE:garlic>)
+    set_tests_properties(dex_smali_lookup_lifetime PROPERTIES LABELS "e2e")
+endif ()
+
 option(GARLIC_DEX_MUTF8_TEST "Enable the DEX MUTF-8 string boundary integration test" OFF)
 if (GARLIC_DEX_MUTF8_TEST)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

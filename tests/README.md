@@ -52,6 +52,29 @@ ctest --test-dir build -R '^smali_decode_integration$' --output-on-failure
 This option defaults to OFF. It requires only local Python and the built Garlic;
 all DEX files are temporary, with no JDK, SDK, network, or device dependency.
 
+## Multidex single-class smali lookup lifetime
+
+`e2e/dex_smali_lookup_lifetime.py` is an opt-in Linux CLI error regression for
+whole-APK lookups exhausting memory while individual DEX lookups succeed. A
+temporary APK repeats a legal DEX with a large source-name string before the
+requested class. A child-only 128 MiB `RLIMIT_AS` reproduces the accumulation
+without exhausting the host. Exact smali output is checked for standalone DEX,
+multidex APK, and nested APK; a missing class must still return exit 1 and the
+class-not-found diagnostic. This is a lifetime regression, not a throughput or
+memory benchmark. It needs only Python's standard library and the built CLI;
+there is no external APK, SDK, network, or installed-server dependency.
+
+```sh
+cmake -S . -B build -DGARLIC_SMALI_LOOKUP_LIFETIME_TEST=ON
+cmake --build build --target garlic
+ctest --test-dir build -R '^dex_smali_lookup_lifetime$' --output-on-failure
+# Or: python3 tests/e2e/dex_smali_lookup_lifetime.py build/garlic
+```
+
+The option defaults to OFF; run this e2e explicitly by name. The address-space
+limit is not compatible with sanitizer runtimes that reserve large virtual
+address ranges. The runner's `--help` describes its CLI.
+
 ## DEX MUTF-8 string boundaries
 
 `dex_mutf8_integration.py` hand-builds a minimal DEX035 class and reads its source

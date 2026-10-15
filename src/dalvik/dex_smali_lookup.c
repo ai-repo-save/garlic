@@ -41,9 +41,11 @@ static int descriptor_from_query(char *out, size_t cap, const char *query)
     return 0;
 }
 
+/* The lookup consumes this DEX; no metadata is needed after rendering. */
 static int write_matching_class(jd_meta_dex *meta, const char *descriptor, FILE *stream)
 {
     int i;
+    int rc = 1;
 
     if (meta == NULL || meta->header == NULL)
         return 2;
@@ -53,10 +55,13 @@ static int write_matching_class(jd_meta_dex *meta, const char *descriptor, FILE 
         string desc = dex_str_of_type_id(meta, cf->class_idx);
         if (desc != NULL && STR_EQL(desc, descriptor)) {
             dex_class_def_to_smali(meta, cf, stream);
-            return 0;
+            rc = 0;
+            break;
         }
     }
-    return 1;
+    pthread_mutex_destroy(&meta->lambda_lock);
+    mem_pool_free(meta->pool);
+    return rc;
 }
 
 static int write_from_dex_path(const char *path, const char *descriptor, FILE *stream)
@@ -130,8 +135,11 @@ static int write_from_zip(struct zip_t *zip, const char *descriptor, FILE *strea
         zip_entry_noallocread(zip, (void *)buf, buf_size);
         zip_entry_close(zip);
 
+        /* Parser and renderer scratch allocations also belong to this entry. */
+        mem_pool *outer = mem_scratch_enter();
         rc = write_matching_class(parse_dex_from_buffer(buf, buf_size),
                                   descriptor, stream);
+        mem_scratch_leave(outer);
         free(buf);
         if (rc == 0)
             return 0;
