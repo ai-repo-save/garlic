@@ -8,3 +8,5 @@ cmake-build-debug/
 doc/
 cmake-build-release/
 /*.java
+!tests/e2e/dex_smali_lookup_lifetime.py
+!docs/bug-reports/apk-smali-lookup-memory.md
