@@ -43,7 +43,11 @@ length, or terminator checks.
   bare `80`/`bf`, short/long UTF-16 lengths).
 - Real-world read-only smoke: CLI smali can now read `X.05iZ` from the supplied
   `classes3.dex`, exit 0, 101 lines / 2270 bytes, empty stderr; before fix exit 2.
-  Neither sample nor generated DEX files are committed.
+  Neither sample nor generated DEX files are committed. The rebuilt binary also
+  returns the same class through MCP.
+- Whole-APK MCP smali queries on TikTok 47.4.1 still return `exit=-1`; this fix
+  does not resolve that separate process failure. The profile investigation uses
+  the supported per-DEX MCP input path, which returns the required classes.
 - `dex_mutf8_integration`, `smali_decode_integration`,
   `dex_rendering_integration`, and `mcp_request_lifetime` pass.
 - Existing `smali_payload_integration` fails both with the original condition
