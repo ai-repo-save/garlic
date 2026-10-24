@@ -1168,6 +1168,22 @@ static void smali_flags(FILE *stream, string flags)
     fprintf(stream, "%.*s", n, flags);
 }
 
+/* 低 3 位是限制等级，位 3/4 是域标志。顺序与 baksmali 的规范输出一致。 */
+static void smali_write_hidden_api(FILE *stream, u4 value)
+{
+    static const char *normal[] = {
+        "whitelist", "greylist", "blacklist",
+        "greylist-max-o", "greylist-max-p", "greylist-max-q", "greylist-max-r"
+    };
+    if (value == NO_HIDDEN_API)
+        return;
+    fprintf(stream, " %s", normal[value & 7]);
+    if (value & 8)
+        fputs(" core-platform-api", stream);
+    if (value & 16)
+        fputs(" test-api", stream);
+}
+
 static void smali_method_defination(jd_meta_dex *dex,
                                     encoded_method *m,
                                     dex_code_item *code,
@@ -1199,6 +1215,7 @@ static void smali_method_defination(jd_meta_dex *dex,
     if (strcmp(method_name, "<init>") == 0 ||
         strcmp(method_name, "<clinit>") == 0)
         fprintf(_smali_stream(stream), " constructor");
+    smali_write_hidden_api(_smali_stream(stream), m->hidden_api);
 
     fprintf(_smali_stream(stream), " %s", method_name);
     smali_proto(_smali_stream(stream), dex, method_id->proto_idx);
@@ -1255,6 +1272,7 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         /* 字段位 0x80 是 transient；方法位 0x80 才是 varargs。 */
         if (efield->access_flags & ACC_TRANSIENT)
             fputs(" transient", stream);
+        smali_write_hidden_api(stream, efield->hidden_api);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         if (cf->static_values != NULL && i < (int) cf->static_values->size) {
             fputs(" = ", stream);
@@ -1276,6 +1294,7 @@ static void smali_write_class_fields(jd_meta_dex *dex,
         /* 字段位 0x80 是 transient；方法位 0x80 才是 varargs。 */
         if (efield->access_flags & ACC_TRANSIENT)
             fputs(" transient", stream);
+        smali_write_hidden_api(stream, efield->hidden_api);
         fprintf(stream, " %s:%s", dex_field_name(dex, efield), dex_field_desc(dex, efield));
         fputc('\n', stream);
         smali_write_field_annotations(stream, dex, cf, efield->field_id);

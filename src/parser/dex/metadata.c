@@ -788,12 +788,14 @@ static void parse_dex_class_defs_anos(jd_meta_dex *dex, dex_class_def *cf)
 
 static void parse_dex_encoded_field(jd_meta_dex *dex, encoded_field *field)
 {
+    field->hidden_api = NO_HIDDEN_API;
     field->field_idx_diff = read_unsigned_leb128(dex);
     field->access_flags = read_unsigned_leb128(dex);
 }
 
 static void parse_dex_encoded_method(jd_meta_dex *dex, encoded_method *method)
 {
+    method->hidden_api = NO_HIDDEN_API;
     method->method_idx_diff = read_unsigned_leb128(dex);
     method->access_flags = read_unsigned_leb128(dex);
     method->code_off = read_unsigned_leb128(dex);
@@ -1292,6 +1294,124 @@ static void parse_dex_class_data_items(jd_meta_dex *dex, dex_class_def *cdef)
     }
 }
 
+static bool hidden_api_value_ok(u4 value)
+{
+    u4 low = value & 7;
+    return low <= 6 && (value & ~(7u | 8u | 16u)) == 0;
+}
+
+static bool read_hidden_api_member(jd_meta_dex *dex, u4 *out)
+{
+    u4 value = (u4) read_unsigned_leb128(dex);
+    if (dex_invalid(dex) || !hidden_api_value_ok(value)) {
+        dex_mark_invalid_reason(dex, "hiddenapi restriction is not a known flag");
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+/* 段内顺序与 class_data 相同：静态字段、实例字段、direct 方法、virtual 方法。 */
+static void parse_dex_hidden_api(jd_meta_dex *dex)
+{
+    u4 map_off;
+    u4 count;
+    u4 section = 0;
+    bool found = false;
+
+    if (dex_invalid(dex) || dex->header == NULL || dex->header->map_off == 0)
+        return;
+    map_off = dex->header->map_off;
+    if (!dex_range_ok(dex, map_off, 4))
+        return;
+    setup_current_offset(dex, map_off);
+    count = 0;
+    jdex_read4(dex, &count);
+    if (dex_invalid(dex))
+        return;
+    for (u4 i = 0; i < count; ++i) {
+        u2 type = 0;
+        u2 unused = 0;
+        u4 size = 0;
+        u4 offset = 0;
+        jdex_read2(dex, &type);
+        jdex_read2(dex, &unused);
+        jdex_read4(dex, &size);
+        jdex_read4(dex, &offset);
+        (void) unused;
+        (void) size;
+        if (dex_invalid(dex))
+            return;
+        if (type == kDexTypeHiddenApiClassData) {
+            section = offset;
+            found = true;
+        }
+    }
+    if (!found || section == 0)
+        return;
+    if (!dex_range_ok(dex, section, 4)) {
+        dex_mark_invalid_reason(dex, "hiddenapi class data outside the file");
+        return;
+    }
+    setup_current_offset(dex, section);
+    /* 第一个 uint 是整段字节长度，不是类数量。类数量与 class_defs 相同。 */
+    u4 section_bytes = 0;
+    u4 nclass = dex->header->class_defs_size;
+    jdex_read4(dex, &section_bytes);
+    if (dex_invalid(dex))
+        return;
+    if (section_bytes < 4u + nclass * 4u ||
+        !dex_range_ok(dex, section, section_bytes)) {
+        dex_mark_invalid_reason(dex, "hiddenapi class data outside the file");
+        return;
+    }
+
+    for (u4 i = 0; i < nclass; ++i) {
+        u4 rel = 0;
+        dex_class_data_item *data;
+        u4 members;
+        setup_current_offset(dex, section + 4 + i * 4);
+        jdex_read4(dex, &rel);
+        if (dex_invalid(dex) || rel == 0)
+            continue;
+        if (rel < 4u + nclass * 4u || rel >= section_bytes) {
+            dex_mark_invalid_reason(dex, "hiddenapi class offset outside the section");
+            return;
+        }
+        data = dex->class_defs[i].class_data;
+        members = data == NULL ? 0 :
+                  data->static_fields_size + data->instance_fields_size +
+                  data->direct_methods_size + data->virtual_methods_size;
+        if (members == 0)
+            continue;
+        if (!dex_count_ok_at(dex, (size_t) section + rel, members, 1)) {
+            dex_mark_invalid_reason(dex, "hiddenapi restrictions outside the file");
+            return;
+        }
+        setup_current_offset(dex, section + rel);
+        if (data->static_fields != NULL) {
+            for (u4 j = 0; j < data->static_fields_size; ++j)
+                if (!read_hidden_api_member(dex, &data->static_fields[j].hidden_api))
+                    return;
+        }
+        if (data->instance_fields != NULL) {
+            for (u4 j = 0; j < data->instance_fields_size; ++j)
+                if (!read_hidden_api_member(dex, &data->instance_fields[j].hidden_api))
+                    return;
+        }
+        if (data->direct_methods != NULL) {
+            for (u4 j = 0; j < data->direct_methods_size; ++j)
+                if (!read_hidden_api_member(dex, &data->direct_methods[j].hidden_api))
+                    return;
+        }
+        if (data->virtual_methods != NULL) {
+            for (u4 j = 0; j < data->virtual_methods_size; ++j)
+                if (!read_hidden_api_member(dex, &data->virtual_methods[j].hidden_api))
+                    return;
+        }
+    }
+}
+
 static void parse_dex_class_defs(jd_meta_dex *dex)
 {
     dex_header *header = dex->header;
@@ -1352,6 +1472,8 @@ static void parse_dex_class_defs(jd_meta_dex *dex)
         else if (dex_class_is_inner_class(dex, class_def))
             class_def->is_inner = true;
     }
+
+    parse_dex_hidden_api(dex);
 
     DEBUG_PRINT("[class_defs_size]: %d\n", header->class_defs_size);
 }

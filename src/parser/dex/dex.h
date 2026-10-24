@@ -141,7 +141,11 @@ enum {
     kDexTypeAnnotationItem           = 0x2004,
     kDexTypeEncodedArrayItem         = 0x2005,
     kDexTypeAnnotationsDirectoryItem = 0x2006,
+    kDexTypeHiddenApiClassData       = 0xF000,
 };
+
+/* hiddenapi 记录不存在。0 是合法的 whitelist，不能拿来表示缺失。 */
+#define NO_HIDDEN_API 0xffffffffu
 
 enum {
     kDexChunkClassLookup            = 0x434c4b50,
@@ -331,6 +335,7 @@ typedef struct {
     u4 field_idx_diff;
     u4 access_flags;
     u4 field_id;
+    u4 hidden_api;
 } encoded_field;
 
 typedef struct {
@@ -338,6 +343,7 @@ typedef struct {
     u4 access_flags;
     u4 code_off;
     u4 method_id;
+    u4 hidden_api;
     dex_code_item *code;
 } encoded_method;
 
