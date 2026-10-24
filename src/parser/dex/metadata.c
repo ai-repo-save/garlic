@@ -1300,10 +1300,19 @@ static bool hidden_api_value_ok(u4 value)
     return low <= 6 && (value & ~(7u | 8u | 16u)) == 0;
 }
 
-static bool read_hidden_api_member(jd_meta_dex *dex, u4 *out)
+static bool read_hidden_api_member(jd_meta_dex *dex, u4 section_end, u4 *out)
 {
-    u4 value = (u4) read_unsigned_leb128(dex);
-    if (dex_invalid(dex) || !hidden_api_value_ok(value)) {
+    u4 value;
+    if (dex->bin->cur_off >= section_end) {
+        dex_mark_invalid_reason(dex, "hiddenapi restriction outside the section");
+        return false;
+    }
+    value = (u4) read_unsigned_leb128(dex);
+    if (dex_invalid(dex) || dex->bin->cur_off > section_end) {
+        dex_mark_invalid_reason(dex, "hiddenapi restriction outside the section");
+        return false;
+    }
+    if (!hidden_api_value_ok(value)) {
         dex_mark_invalid_reason(dex, "hiddenapi restriction is not a known flag");
         return false;
     }
@@ -1389,24 +1398,25 @@ static void parse_dex_hidden_api(jd_meta_dex *dex)
             return;
         }
         setup_current_offset(dex, section + rel);
+        u4 section_end = section + section_bytes;
         if (data->static_fields != NULL) {
             for (u4 j = 0; j < data->static_fields_size; ++j)
-                if (!read_hidden_api_member(dex, &data->static_fields[j].hidden_api))
+                if (!read_hidden_api_member(dex, section_end, &data->static_fields[j].hidden_api))
                     return;
         }
         if (data->instance_fields != NULL) {
             for (u4 j = 0; j < data->instance_fields_size; ++j)
-                if (!read_hidden_api_member(dex, &data->instance_fields[j].hidden_api))
+                if (!read_hidden_api_member(dex, section_end, &data->instance_fields[j].hidden_api))
                     return;
         }
         if (data->direct_methods != NULL) {
             for (u4 j = 0; j < data->direct_methods_size; ++j)
-                if (!read_hidden_api_member(dex, &data->direct_methods[j].hidden_api))
+                if (!read_hidden_api_member(dex, section_end, &data->direct_methods[j].hidden_api))
                     return;
         }
         if (data->virtual_methods != NULL) {
             for (u4 j = 0; j < data->virtual_methods_size; ++j)
-                if (!read_hidden_api_member(dex, &data->virtual_methods[j].hidden_api))
+                if (!read_hidden_api_member(dex, section_end, &data->virtual_methods[j].hidden_api))
                     return;
         }
     }
