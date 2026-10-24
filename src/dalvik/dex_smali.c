@@ -1288,10 +1288,7 @@ static void smali_write_class_def(jd_meta_dex *dex,
                                   FILE *stream)
 {
     string class_name = dex_str_of_type_id(dex, cf->class_idx);
-    /* 根类的 superclass_idx 是 NO_INDEX：不要去查表，否则会触发越界保护。 */
-    string super_name = cf->superclass_idx == 0xFFFFFFFF
-                            ? ""
-                            : dex_str_of_type_id(dex, cf->superclass_idx);
+    string super_name = dex_str_of_superclass(dex, cf);
 
     str_list *list = str_list_init();
     dex_class_access_flag_with_flags(cf->access_flags, list);
@@ -1306,7 +1303,7 @@ static void smali_write_class_def(jd_meta_dex *dex,
     fprintf(stream, " %s\n", class_name);
     const u4 kNoIndex = 0xFFFFFFFF;
     /* 根类的 superclass_idx 是 NO_INDEX，参考实现在这种情况下不写 .super 行。 */
-    if (cf->superclass_idx != kNoIndex)
+    if (super_name != NULL)
         fprintf(stream, ".super %s\n", super_name);
 
     if (cf->source_file_idx != kNoIndex &&

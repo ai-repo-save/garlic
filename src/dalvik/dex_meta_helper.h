@@ -35,6 +35,17 @@ static inline string dex_str_of_type_id(jd_meta_dex *meta, u2 idx)
     return dex_str_of_idx(meta, meta->type_ids[idx].descriptor_idx);
 }
 
+static inline string dex_str_of_superclass(jd_meta_dex *meta, dex_class_def *cf)
+{
+    /* NO_INDEX 是根类的合法值，不能当成类型表索引。其余越界仍拒绝该文件。 */
+    if (cf->superclass_idx == NO_INDEX)
+        return NULL;
+    if (!dex_meta_index_ok(meta, cf->superclass_idx,
+                           meta->header == NULL ? 0 : meta->header->type_ids_size))
+        return "";
+    return dex_str_of_type_id(meta, cf->superclass_idx);
+}
+
 static inline string dex_str_of_field_type(jd_meta_dex *meta, u2 idx)
 {
     if (!dex_meta_index_ok(meta, idx, meta->header == NULL ? 0 : meta->header->field_ids_size))
