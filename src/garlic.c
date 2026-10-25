@@ -7,6 +7,8 @@
 #include "apk/apk.h"
 #include "dalvik/dex_decompile.h"
 #include "dex_smali.h"
+#include "dalvik/dex_jimple.h"
+#include <getopt.h>
 #include "dalvik/output_syntax.h"
 #include "analyzer/jd_analyzer.h"
 #include "ai/jd_mcp.h"
@@ -31,6 +33,7 @@ typedef enum {
     JD_FILE_OPTION_DUMP, // like javap or dexdump
     JD_FILE_OPTION_SEARCH, // search for a string in the file
     JD_FILE_OPTION_SMALI, // dex/apk to smali
+    JD_FILE_OPTION_JIMPLE, // dex/apk to Jimple
     JD_FILE_OPTION_CALL_GRAPH, // generate call graph
     JD_FILE_OPTION_ELF_ANALYSIS, // analyze ELF binary
 } jd_file_option_t;
@@ -140,7 +143,8 @@ static void opt_usage(const char *progname) {
     fprintf(stderr, "    -t: number of threads to use (default is 4)\n");
     fprintf(stderr, "    -g: generate call graph for dex/apk\n");
     fprintf(stderr, "    -s: apk/dex to smali\n");
-    fprintf(stderr, "    -c: with -s, write one class smali to stdout (or -o file)\n");
+    fprintf(stderr, "    --jimple: apk/dex to Jimple\n");
+    fprintf(stderr, "    -c: with -s or --jimple, write one class to stdout (or -o file)\n");
     fprintf(stderr, "    -n: analyze native libs\n");
     fprintf(stderr, "    -m: start MCP server (stdio protocol)\n");
     fprintf(stderr, "    --serve [dir] [port]: start HTTP server (default: . 8080)\n");
@@ -166,8 +170,17 @@ static jd_opt* parse_opt(int argc, char **argv) {
     opt->path = path;
     opt->ft = ft;
 
-    while ((oc = getopt(argc, argv, "spo:t:ghmnc:")) != -1) {
+    static const struct option long_opts[] = {
+        {"jimple", no_argument, NULL, 1},
+        {NULL, 0, NULL, 0}
+    };
+    int long_idx = 0;
+
+    while ((oc = getopt_long(argc, argv, "spo:t:ghmnc:", long_opts, &long_idx)) != -1) {
         switch (oc) {
+            case 1:
+                opt->option = JD_FILE_OPTION_JIMPLE;
+                break;
             case 'p': { // like javap
                 opt->option = JD_FILE_OPTION_DUMP;
                 break;
@@ -260,6 +273,35 @@ static void run_for_jvm_jar(jd_opt *opt) {
     printf("Thread   : %d\n", opt->thread_num);
     jar_file_analyse(opt->path, opt->out, opt->thread_num);
     printf("\n[Done]\n");
+}
+
+static int run_for_class_jimple(jd_opt *opt)
+{
+    FILE *stream = stdout;
+    FILE *file = NULL;
+    int rc;
+
+    if (opt->out != NULL) {
+        file = fopen(opt->out, "wb");
+        if (file == NULL) {
+            fprintf(stderr, "[garlic] Cannot write jimple to %s\n", opt->out);
+            return 2;
+        }
+        stream = file;
+    }
+
+    rc = dex_jimple_write_class_from_path(opt->path, opt->class_name, stream);
+    if (file != NULL)
+        fclose(file);
+    if (rc == 1) {
+        fprintf(stderr, "[garlic] Class not found: %s\n", opt->class_name);
+        return 1;
+    }
+    if (rc != 0) {
+        fprintf(stderr, "[garlic] Failed to write jimple for %s\n", opt->class_name);
+        return 2;
+    }
+    return 0;
 }
 
 static int run_for_class_smali(jd_opt *opt)
@@ -406,7 +448,9 @@ int main(int argc, char **argv)
     jd_opt *opt = parse_opt(argc, argv);
 
     if (opt->class_name != NULL) {
-        int rc = run_for_class_smali(opt);
+        int rc = opt->option == JD_FILE_OPTION_JIMPLE
+                 ? run_for_class_jimple(opt)
+                 : run_for_class_smali(opt);
         free_opt(opt);
         return rc;
     }

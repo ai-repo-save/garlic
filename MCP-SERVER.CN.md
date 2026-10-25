@@ -190,6 +190,18 @@ Garlic MCP 提供 **7 个工具**。以下按典型工作流顺序排列 —— 
   smali(path="/path/to/app.apk", class_name="ms.bd.o.h2")
   ```
 
+### `jimple`
+
+从 Dalvik 字节码输出一个类的 Jimple，不经过 Java 反编译器。
+
+- 参数：`path`（string）为 `.apk` 或 `.dex`；`class_name`（string）为 `ms.bd.o.h2` 或 `Lms/bd/o/h2;`。
+- 输出：该类的 Jimple 文本。
+- 命令行：`garlic app.apk --jimple -c ms.bd.o.h2`
+- 示例：
+  ```
+  jimple(path="/path/to/app.apk", class_name="ms.bd.o.h2")
+  ```
+
 ### 4. `call_graph`（调用图）
 
 为 `.dex` 或 `.apk` 文件生成完整的调用图。

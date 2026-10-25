@@ -42,7 +42,8 @@ static int descriptor_from_query(char *out, size_t cap, const char *query)
 }
 
 /* The lookup consumes this DEX; no metadata is needed after rendering. */
-static int write_matching_class(jd_meta_dex *meta, const char *descriptor, FILE *stream)
+static int write_matching_class(jd_meta_dex *meta, const char *descriptor,
+                                  FILE *stream, dex_class_writer writer)
 {
     int i;
     int rc = 1;
@@ -54,7 +55,7 @@ static int write_matching_class(jd_meta_dex *meta, const char *descriptor, FILE 
         dex_class_def *cf = &meta->class_defs[i];
         string desc = dex_str_of_type_id(meta, cf->class_idx);
         if (desc != NULL && STR_EQL(desc, descriptor)) {
-            dex_class_def_to_smali(meta, cf, stream);
+            writer(meta, cf, stream);
             rc = 0;
             break;
         }
@@ -64,15 +65,17 @@ static int write_matching_class(jd_meta_dex *meta, const char *descriptor, FILE 
     return rc;
 }
 
-static int write_from_dex_path(const char *path, const char *descriptor, FILE *stream)
+static int write_from_dex_path(const char *path, const char *descriptor,
+                                 FILE *stream, dex_class_writer writer)
 {
     jd_meta_dex *meta = parse_dex_file((string)path);
     if (meta == NULL)
         return 2;
-    return write_matching_class(meta, descriptor, stream);
+    return write_matching_class(meta, descriptor, stream, writer);
 }
 
-static int write_from_zip(struct zip_t *zip, const char *descriptor, FILE *stream)
+static int write_from_zip(struct zip_t *zip, const char *descriptor,
+                            FILE *stream, dex_class_writer writer)
 {
     int total;
     int i;
@@ -108,7 +111,7 @@ static int write_from_zip(struct zip_t *zip, const char *descriptor, FILE *strea
                 zip_entry_noallocread(zip, (void *)buf, buf_size);
                 nested = zip_stream_open(buf, buf_size, 0, 'r');
                 if (nested) {
-                    rc = write_from_zip(nested, descriptor, stream);
+                    rc = write_from_zip(nested, descriptor, stream, writer);
                     zip_stream_close(nested);
                     if (rc == 0)
                         found = 0;
@@ -138,7 +141,7 @@ static int write_from_zip(struct zip_t *zip, const char *descriptor, FILE *strea
         /* Parser and renderer scratch allocations also belong to this entry. */
         mem_pool *outer = mem_scratch_enter();
         rc = write_matching_class(parse_dex_from_buffer(buf, buf_size),
-                                  descriptor, stream);
+                                  descriptor, stream, writer);
         mem_scratch_leave(outer);
         free(buf);
         if (rc == 0)
@@ -149,14 +152,15 @@ static int write_from_zip(struct zip_t *zip, const char *descriptor, FILE *strea
     return found;
 }
 
-int dex_smali_write_class_from_path(const char *path,
-                                    const char *class_name,
-                                    FILE *stream)
+int dex_write_class_from_path(const char *path,
+                              const char *class_name,
+                              FILE *stream,
+                              dex_class_writer writer)
 {
     char descriptor[1024];
     int rc;
 
-    if (path == NULL || stream == NULL)
+    if (path == NULL || stream == NULL || writer == NULL)
         return 2;
     if (descriptor_from_query(descriptor, sizeof(descriptor), class_name) != 0)
         return 2;
@@ -169,13 +173,21 @@ int dex_smali_write_class_from_path(const char *path,
             mem_free_pool();
             return 2;
         }
-        rc = write_from_zip(zip, descriptor, stream);
+        rc = write_from_zip(zip, descriptor, stream, writer);
         zip_close(zip);
         mem_free_pool();
         return rc;
     }
 
-    rc = write_from_dex_path(path, descriptor, stream);
+    rc = write_from_dex_path(path, descriptor, stream, writer);
     mem_free_pool();
     return rc;
+}
+
+int dex_smali_write_class_from_path(const char *path,
+                                    const char *class_name,
+                                    FILE *stream)
+{
+    return dex_write_class_from_path(path, class_name, stream,
+                                     dex_class_def_to_smali);
 }

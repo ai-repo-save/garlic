@@ -190,6 +190,18 @@ Return smali for one class from Dalvik bytecode. This path does not run the Java
   smali(path="/path/to/app.apk", class_name="ms.bd.o.h2")
   ```
 
+### `jimple`
+
+Return Jimple for one class from Dalvik bytecode. This path does not run the Java decompiler.
+
+- Input: `path` (string) to an `.apk` or `.dex` file; `class_name` (string) as `ms.bd.o.h2` or `Lms/bd/o/h2;`.
+- Output: Jimple text for that class on stdout.
+- CLI: `garlic app.apk --jimple -c ms.bd.o.h2`
+- Example:
+  ```
+  jimple(path="/path/to/app.apk", class_name="ms.bd.o.h2")
+  ```
+
 ### 4. `call_graph`
 
 Generate a full call graph for a `.dex` or `.apk` file.
