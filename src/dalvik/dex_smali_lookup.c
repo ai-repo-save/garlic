@@ -55,8 +55,7 @@ static int write_matching_class(jd_meta_dex *meta, const char *descriptor,
         dex_class_def *cf = &meta->class_defs[i];
         string desc = dex_str_of_type_id(meta, cf->class_idx);
         if (desc != NULL && STR_EQL(desc, descriptor)) {
-            writer(meta, cf, stream);
-            rc = 0;
+            rc = writer(meta, cf, stream);
             break;
         }
     }
@@ -184,10 +183,15 @@ int dex_write_class_from_path(const char *path,
     return rc;
 }
 
+static int write_smali_class(jd_meta_dex *meta, dex_class_def *cf, FILE *stream)
+{
+    dex_class_def_to_smali(meta, cf, stream);
+    return 0;
+}
+
 int dex_smali_write_class_from_path(const char *path,
                                     const char *class_name,
                                     FILE *stream)
 {
-    return dex_write_class_from_path(path, class_name, stream,
-                                     dex_class_def_to_smali);
+    return dex_write_class_from_path(path, class_name, stream, write_smali_class);
 }
