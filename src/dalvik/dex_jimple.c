@@ -64,6 +64,13 @@ static char *pool_printf(const char *fmt, ...)
     return out;
 }
 
+static char *jimple_long_literal(s8 value)
+{
+    if (value == INT64_MIN)
+        return "(-9223372036854775807L - 1L)";
+    return pool_printf("%lldL", (long long)value);
+}
+
 static char *jimple_string(const char *text)
 {
     size_t n = text == NULL ? 0 : strlen(text);
@@ -983,7 +990,7 @@ static void emit_one(jimple_body *body, int i)
                 wide = (s8)(lo | (hi << 32));
             }
             dest = def_reg(body, dst, "long");
-            emit_stmt(body, pool_printf("%s = %lldL", dest, (long long)wide));
+            emit_stmt(body, pool_printf("%s = %s", dest, jimple_long_literal(wide)));
             def_reg(body, dst + 1, "long");
             break;
         }
@@ -1152,12 +1159,13 @@ static void emit_fill_array(jimple_body *body, int i)
     }
     {
         int data = target + 4;
-        if ((data & 1) != 0 && width >= 4)
-            data++;
         for (k = 0; k < size; k++) {
             s8 value = 0;
             int at = data + (int)((k * width) / 2);
-            if (at < 0 || at >= (int)code->insns_size)
+            int units = width / 2;
+            if (units < 1)
+                units = 1;
+            if (at < 0 || at + units > (int)code->insns_size)
                 break;
             if (width == 1)
                 value = (k & 1) ? (code->insns[at] >> 8) : (code->insns[at] & 0xFF);
@@ -1168,7 +1176,9 @@ static void emit_fill_array(jimple_body *body, int i)
             else
                 value = (s8)((u4)code->insns[at] | ((u8)code->insns[at + 1] << 16) |
                              ((u8)code->insns[at + 2] << 32) | ((u8)code->insns[at + 3] << 48));
-            emit_stmt(body, pool_printf("%s[%u] = %lld", use_reg(body, reg), k, (long long)value));
+            emit_stmt(body, pool_printf("%s[%u] = %s", use_reg(body, reg), k,
+                                        width == 8 ? jimple_long_literal(value)
+                                                   : pool_printf("%lld", (long long)value)));
         }
     }
 }
@@ -1468,8 +1478,19 @@ static int emit_method(jd_meta_dex *dex, dex_class_def *cf, encoded_method *meth
         i += len;
     }
     flush_invoke(&body);
-    if (body.end_label)
+    {
+        int label_at;
+        for (label_at = i; label_at < (int)code->insns_size; label_at++) {
+            if (body.labels[label_at]) {
+                add_line(&body, pool_printf("label_%d:", label_at));
+                add_line(&body, pool_printf("goto label_%d;", label_at));
+            }
+        }
+    }
+    if (body.end_label) {
         add_line(&body, pool_printf("label_%u:", code->insns_size));
+        add_line(&body, pool_printf("goto label_%u;", code->insns_size));
+    }
     emit_catches(&body);
     apply_cleanup(&body);
     {
