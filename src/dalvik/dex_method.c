@@ -5,6 +5,7 @@
 #include "dex_exception.h"
 #include "parser/dex/metadata.h"
 #include "dex_annotation.h"
+#include <time.h>
 
 void dex_method_access_flag_with_flags(u4 flags, str_list *list)
 {
@@ -146,7 +147,7 @@ static void init_dex_instruction_graph(jd_method *m)
     }
 }
 
-static void dex_code_item_instruction(jd_method *m, dex_code_item *code)
+static int dex_code_item_instruction(jd_method *m, dex_code_item *code)
 {
     m->instructions = linit_object();
     m->offset2id_map = hashmap_init((hcmp_fn) i2i_cmp, 0);
@@ -211,6 +212,13 @@ static void dex_code_item_instruction(jd_method *m, dex_code_item *code)
         else {
             ins->param_length = dex_opcode_len(opcode);
         }
+        if (ins->param_length <= 0 || offset + ins->param_length > code->insns_size) {
+            fprintf(stderr, "timestamp=%lld level=ERROR event=dex_instruction_invalid "
+                            "op=%u at=%u method_id=%u\n",
+                    (long long)time(NULL), opcode, offset,
+                    ((encoded_method *)m->meta_method)->method_id);
+            return 2;
+        }
         i += (ins->param_length - 1);
         offset += ins->param_length;
 
@@ -222,6 +230,7 @@ static void dex_code_item_instruction(jd_method *m, dex_code_item *code)
         }
         prev = ins;
     }
+    return 0;
 }
 
 void dex_method_init(jsource_file *jf, jd_method *m, encoded_method *em)
@@ -242,11 +251,15 @@ void dex_method_init(jsource_file *jf, jd_method *m, encoded_method *em)
     if (em->code == NULL)
         return;
 
+    dex_method_init_code(m, em);
+}
+
+int dex_method_init_code(jd_method *m, encoded_method *em)
+{
     m->max_locals = em->code->registers_size;
-
-    dex_code_item_instruction(m, em->code);
-
+    if (dex_code_item_instruction(m, em->code) != 0)
+        return 2;
     init_dex_instruction_graph(m);
-
     dex_method_exception_init(m, em);
+    return 0;
 }

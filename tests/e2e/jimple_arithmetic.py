@@ -321,13 +321,13 @@ def main():
             f"Error: jimple failed (exit=2; path={invalid}; class=JimpleArithmetic)"
         ), failure
         diagnostic = re.search(
-            r"event=jimple_opcode_unmapped op=(\d+) at=(\d+) method=(<[^>]+>)", failure
+            r"event=dex_instruction_invalid op=(\d+) at=(\d+) method_id=(\d+)", failure
         )
         assert diagnostic is not None, failure
         assert diagnostic.groups() == (
             "62",
             "1",
-            "<JimpleArithmetic: int reserved(int)>",
+            "0",
         ), failure
         (root / "JimpleArithmetic.jimple").write_text(text)
         output = root / "classes"

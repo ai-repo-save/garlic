@@ -369,6 +369,9 @@ static inline void dex_ins_use_def_21c(jd_dex_ins *ins)
 
     switch (ins->code) {
         case DEX_INS_CHECK_CAST:
+            bitset_set(ins->uses, v_a);
+            bitset_set(ins->defs, v_a);
+            break;
         case DEX_INS_SPUT:
         case DEX_INS_SPUT_WIDE:
         case DEX_INS_SPUT_OBJECT:
@@ -780,9 +783,8 @@ static inline void dex_ins_use_def_3rc(jd_dex_ins *ins)
     u1 v_a = dex_ins_parameter(ins, 0);
     u2 type_index = dex_ins_parameter(ins, 1);
     u2 start_index = dex_ins_parameter(ins, 2);
-    u2 count = start_index + v_a - 1;
-    for (int i = start_index; i <= count; ++i) {
-        bitset_set(ins->uses, i);
+    for (int i = 0; i < v_a; ++i) {
+        bitset_set(ins->uses, start_index + i);
     }
 }
 
@@ -895,10 +897,8 @@ static inline void dex_ins_use_def_4rcc(jd_dex_ins *ins)
     u2 v_bbbb = dex_ins_parameter(ins, 1);
     u2 v_cccc = dex_ins_parameter(ins, 2);
     u2 v_hhhh = dex_ins_parameter(ins, 3);
-    u2 count = v_cccc + v_a - 1;
-
-    for (int j = v_cccc; j <= count; ++j) {
-        bitset_set(ins->uses, j);
+    for (int j = 0; j < v_a; ++j) {
+        bitset_set(ins->uses, v_cccc + j);
     }
 }
 

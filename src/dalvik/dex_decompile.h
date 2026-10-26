@@ -4,6 +4,8 @@
 #include "dalvik/dex_structure.h"
 #include "apk/apk.h"
 
+void dex_init_ins_fn(jd_dex *dex);
+
 void dex_decompile_threadpool_start(jd_dex *dex);
 
 void dex_decompile_main_thread_start(jd_dex *dex);
