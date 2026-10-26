@@ -27,4 +27,6 @@ cmake-build-release/
 !src/parser/dex/instruction.c
 !src/dalvik/dex_jimple_literals.c
 !src/dalvik/dex_jimple_literals.h
+!src/dalvik/dex_jimple_body.h
+!src/dalvik/dex_jimple_payload.c
 !docs/bug-reports/apk-smali-lookup-memory.md

@@ -6,7 +6,7 @@
 #include <string.h>
 #include <time.h>
 
-#include "dalvik/dex_analysis.h"
+#include "dalvik/dex_jimple_body.h"
 #include "dalvik/dex_jimple_literals.h"
 
 #include "dalvik/dex_ins_helper.h"
@@ -14,37 +14,9 @@
 #include "dalvik/dex_smali.h"
 #include "dalvik/dex_smali_write.h"
 #include "libs/memory/mem_pool.h"
-
-typedef struct {
-    char *name;
-    char *type;
-} jimple_reg;
-
-typedef struct {
-    jd_meta_dex *dex;
-    dex_code_item *code;
-    dex_analysis *analysis;
-    int unit;
-    char *signature;
-    FILE *stream;
-    jimple_reg *regs;
-    int nregs;
-    char **locals;
-    char **local_types;
-    int nlocals;
-    char **lines;
-    int nlines;
-    unsigned char *labels;
-    int end_label;
-    char *pending_invoke;
-    char *pending_value;
-    char *pending_type;
-    int failed;
-} jimple_body;
+#include "parser/dex/metadata.h"
 
 static s4 read_s4(const dex_code_item *code, int unit);
-static void emit_switch(jimple_body *body, int i);
-static void emit_fill_array(jimple_body *body, int i);
 static void emit_special_invoke(jimple_body *body, int i);
 static void apply_cleanup(jimple_body *body);
 
@@ -71,7 +43,7 @@ static char *pool_printf(const char *fmt, ...)
     return out;
 }
 
-static char *jimple_type(const char *desc)
+char *dex_jimple_type(const char *desc)
 {
     char *out;
     size_t n;
@@ -142,7 +114,7 @@ static char *type_prefix(const char *type)
     return "r";
 }
 
-static void remember_local(jimple_body *body, char *name, char *type)
+void dex_jimple_remember_local(jimple_body *body, char *name, char *type)
 {
     int i;
     for (i = 0; i < body->nlocals; i++) {
@@ -164,7 +136,7 @@ static char *value_type(jimple_body *body, int value, unsigned kind)
         case DEX_VALUE_DOUBLE: return "double";
         case DEX_VALUE_REFERENCE:
             return body->analysis->types[value].array != NULL
-                   ? jimple_type(body->analysis->types[value].array) : "java.lang.Object";
+                   ? dex_jimple_type(body->analysis->types[value].array) : "java.lang.Object";
         default: return "int";
     }
 }
@@ -189,7 +161,7 @@ static char *value_local(jimple_body *body, int reg, int value, unsigned kind)
     }
     char *type = value_type(body, value, kind);
     char *name = pool_printf("%s%d_%d", type_prefix(type), reg, value);
-    remember_local(body, name, type);
+    dex_jimple_remember_local(body, name, type);
     return name;
 }
 
@@ -217,7 +189,7 @@ static char *def_reg(jimple_body *body, int reg, char *type)
     return body->regs[reg].name;
 }
 
-static char *use_reg(jimple_body *body, int reg)
+char *dex_jimple_use_reg(jimple_body *body, int reg)
 {
     if (reg < 0 || reg >= body->nregs || body->regs[reg].name == NULL) {
         value_failure(body, "undefined_register", reg, -1, 0);
@@ -255,13 +227,13 @@ static char *append_reg_arg(jimple_body *body, char *args, int *started, int reg
         *prev = reg;
         return args;
     }
-    args = pool_printf("%s%s%s", args, *started ? ", " : "", use_reg(body, reg));
+    args = pool_printf("%s%s%s", args, *started ? ", " : "", dex_jimple_use_reg(body, reg));
     *started = 1;
     *prev = reg;
     return args;
 }
 
-static void mark_label(jimple_body *body, int unit)
+void dex_jimple_mark_label(jimple_body *body, int unit)
 {
     if (unit < 0)
         return;
@@ -287,15 +259,15 @@ static char *method_sig(jd_meta_dex *dex, u2 method_idx)
 {
     dex_method_id *id = &dex->method_ids[method_idx];
     dex_proto_id *proto = &dex->proto_ids[id->proto_idx];
-    char *cls = jimple_type(dex_str_of_type_id(dex, id->class_idx));
-    char *ret = jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
+    char *cls = dex_jimple_type(dex_str_of_type_id(dex, id->class_idx));
+    char *ret = dex_jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
     char *name = dex_str_of_method_id(dex, method_idx);
     char *args = x_alloc(1);
     int i;
     args[0] = '\0';
     if (proto->type_list != NULL) {
         for (i = 0; i < (int)proto->type_list->size; i++) {
-            char *ty = jimple_type(dex_str_of_type_id(dex, proto->type_list->list[i].type_idx));
+            char *ty = dex_jimple_type(dex_str_of_type_id(dex, proto->type_list->list[i].type_idx));
             args = pool_printf("%s%s%s", args, i == 0 ? "" : ",", ty);
         }
     }
@@ -306,7 +278,7 @@ static char *method_return(jd_meta_dex *dex, u2 method_idx)
 {
     dex_method_id *id = &dex->method_ids[method_idx];
     dex_proto_id *proto = &dex->proto_ids[id->proto_idx];
-    return jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
+    return dex_jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
 }
 
 static const char *invoke_kind(u1 op)
@@ -462,10 +434,15 @@ static void flush_invoke(jimple_body *body)
     body->pending_type = NULL;
 }
 
-static void emit_stmt(jimple_body *body, const char *stmt)
+void dex_jimple_emit_stmt(jimple_body *body, const char *stmt)
 {
     flush_invoke(body);
     add_line(body, pool_printf("%s;", stmt));
+}
+
+void dex_jimple_emit_label(jimple_body *body, const char *name)
+{
+    add_line(body, pool_printf("%s:", name));
 }
 
 static void emit_constant(jimple_body *body, int reg, u8 bits)
@@ -492,7 +469,7 @@ static void emit_constant(jimple_body *body, int reg, u8 bits)
             literal = dex_jimple_long_literal((s8)bits).text;
         else
             literal = pool_printf("%d", (s4)bits);
-        emit_stmt(body, pool_printf("%s = %s", value_local(body, reg, value, kind), literal));
+        dex_jimple_emit_stmt(body, pool_printf("%s = %s", value_local(body, reg, value, kind), literal));
     }
 }
 
@@ -502,9 +479,9 @@ static void emit_invoke(jimple_body *body, u1 op, char *sig, char *args, char *r
     flush_invoke(body);
     if (strcmp(ret, "void") == 0) {
         if (op == DEX_INS_INVOKE_STATIC || op == DEX_INS_INVOKE_STATIC_RANGE)
-            emit_stmt(body, pool_printf("%s %s(%s)", kind, sig, args));
+            dex_jimple_emit_stmt(body, pool_printf("%s %s(%s)", kind, sig, args));
         else
-            emit_stmt(body, pool_printf("%s %s(%s)", kind, sig, args));
+            dex_jimple_emit_stmt(body, pool_printf("%s %s(%s)", kind, sig, args));
         return;
     }
     body->pending_type = ret;
@@ -526,13 +503,13 @@ static void emit_filled_array(jimple_body *body, int i)
         return;
     }
     char *array = pool_printf("filled_%d", i);
-    char *type = jimple_type(desc);
-    remember_local(body, array, type);
-    emit_stmt(body, pool_printf("%s = newarray (%s)[%d]", array, jimple_type(desc + 1), count));
+    char *type = dex_jimple_type(desc);
+    dex_jimple_remember_local(body, array, type);
+    dex_jimple_emit_stmt(body, pool_printf("%s = newarray (%s)[%d]", array, dex_jimple_type(desc + 1), count));
     for (int n = 0; n < count; n++) {
         int reg = range ? code->insns[i + 2] + n :
                   n == 4 ? (unit >> 8) & 15 : (code->insns[i + 2] >> (n * 4)) & 15;
-        emit_stmt(body, pool_printf("%s[%d] = %s", array, n, use_reg(body, reg)));
+        dex_jimple_emit_stmt(body, pool_printf("%s[%d] = %s", array, n, dex_jimple_use_reg(body, reg)));
     }
     body->pending_value = array;
     body->pending_type = type;
@@ -605,22 +582,22 @@ static void emit_one(jimple_body *body, int i)
             unsigned kinds = body->analysis->types[target].kinds;
             for (unsigned kind = 1; kind <= DEX_VALUE_REFERENCE; kind <<= 1) {
                 if (kinds & kind)
-                    emit_stmt(body, pool_printf("%s = %s",
+                    dex_jimple_emit_stmt(body, pool_printf("%s = %s",
                         value_local(body, dst, target, kind), value_local(body, src, source, kind)));
             }
             break;
         }
         case DEX_INS_MOVE_EXCEPTION:
             dest = def_reg(body, unit >> 8, "java.lang.Throwable");
-            emit_stmt(body, pool_printf("%s := @caughtexception", dest));
+            dex_jimple_emit_stmt(body, pool_printf("%s := @caughtexception", dest));
             break;
         case DEX_INS_RETURN_VOID:
-            emit_stmt(body, "return");
+            dex_jimple_emit_stmt(body, "return");
             break;
         case DEX_INS_RETURN:
         case DEX_INS_RETURN_WIDE:
         case DEX_INS_RETURN_OBJECT:
-            emit_stmt(body, pool_printf("return %s", use_reg(body, unit >> 8)));
+            dex_jimple_emit_stmt(body, pool_printf("return %s", dex_jimple_use_reg(body, unit >> 8)));
             break;
         case DEX_INS_CONST_4: {
             s4 lit = (s4)(unit >> 12);
@@ -649,13 +626,13 @@ static void emit_one(jimple_body *body, int i)
                      ((u4)code->insns[i + 1] | ((u4)code->insns[i + 2] << 16));
             int dst = op == DEX_INS_CONST_STRING ? unit >> 8 : unit >> 8;
             dest = def_reg(body, dst, "java.lang.String");
-            emit_stmt(body, pool_printf("%s = %s", dest, dex_jimple_string(dex_str_of_idx(dex, idx))));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s", dest, dex_jimple_string(dex_str_of_idx(dex, idx))));
             break;
         }
         case DEX_INS_CONST_CLASS: {
             char *desc = dex_str_of_type_id(dex, code->insns[i + 1]);
             dest = def_reg(body, unit >> 8, "java.lang.Class");
-            emit_stmt(body, pool_printf("%s = class %s", dest, dex_jimple_string(desc)));
+            dex_jimple_emit_stmt(body, pool_printf("%s = class %s", dest, dex_jimple_string(desc)));
             break;
         }
         case DEX_INS_IF_EQ:
@@ -669,8 +646,8 @@ static void emit_one(jimple_body *body, int i)
                               op == DEX_INS_IF_LT ? "<" :
                               op == DEX_INS_IF_GE ? ">=" :
                               op == DEX_INS_IF_GT ? ">" : "<=";
-            emit_stmt(body, pool_printf("if %s %s %s goto label_%d",
-                                        use_reg(body, a), cmp, use_reg(body, b),
+            dex_jimple_emit_stmt(body, pool_printf("if %s %s %s goto label_%d",
+                                        dex_jimple_use_reg(body, a), cmp, dex_jimple_use_reg(body, b),
                                         branch_target(op, code, i)));
             break;
         }
@@ -685,16 +662,16 @@ static void emit_one(jimple_body *body, int i)
                               op == DEX_INS_IF_LTZ ? "<" :
                               op == DEX_INS_IF_GEZ ? ">=" :
                               op == DEX_INS_IF_GTZ ? ">" : "<=";
-            char *left = use_reg(body, unit >> 8);
+            char *left = dex_jimple_use_reg(body, unit >> 8);
             char *zero = is_ref_type(body->regs[unit >> 8].type) ? "null" : "0";
-            emit_stmt(body, pool_printf("if %s %s %s goto label_%d",
+            dex_jimple_emit_stmt(body, pool_printf("if %s %s %s goto label_%d",
                                         left, cmp, zero, branch_target(op, code, i)));
             break;
         }
         case DEX_INS_GOTO:
         case DEX_INS_GOTO_16:
         case DEX_INS_GOTO_32:
-            emit_stmt(body, pool_printf("goto label_%d", branch_target(op, code, i)));
+            dex_jimple_emit_stmt(body, pool_printf("goto label_%d", branch_target(op, code, i)));
             break;
         case DEX_INS_IGET:
         case DEX_INS_IGET_WIDE:
@@ -711,18 +688,18 @@ static void emit_one(jimple_body *body, int i)
         case DEX_INS_SGET_CHAR:
         case DEX_INS_SGET_SHORT: {
             u2 field = code->insns[i + 1];
-            char *ty = jimple_type(dex_str_of_field_type(dex, field));
-            char *cls = jimple_type(dex_str_of_field_class(dex, field));
+            char *ty = dex_jimple_type(dex_str_of_field_type(dex, field));
+            char *cls = dex_jimple_type(dex_str_of_field_class(dex, field));
             char *name = dex_str_of_field_name(dex, field);
             int dst = (op >= DEX_INS_SGET) ? unit >> 8 : a;
             int obj = b;
-            char *base = op >= DEX_INS_SGET ? NULL : use_reg(body, obj);
+            char *base = op >= DEX_INS_SGET ? NULL : dex_jimple_use_reg(body, obj);
             dest = def_reg(body, dst, ty);
             if (op >= DEX_INS_SGET)
                 stmt = pool_printf("%s = <%s: %s %s>", dest, cls, ty, name);
             else
                 stmt = pool_printf("%s = %s.<%s: %s %s>", dest, base, cls, ty, name);
-            emit_stmt(body, stmt);
+            dex_jimple_emit_stmt(body, stmt);
             break;
         }
         case DEX_INS_IPUT:
@@ -740,16 +717,16 @@ static void emit_one(jimple_body *body, int i)
         case DEX_INS_SPUT_CHAR:
         case DEX_INS_SPUT_SHORT: {
             u2 field = code->insns[i + 1];
-            char *ty = jimple_type(dex_str_of_field_type(dex, field));
-            char *cls = jimple_type(dex_str_of_field_class(dex, field));
+            char *ty = dex_jimple_type(dex_str_of_field_type(dex, field));
+            char *cls = dex_jimple_type(dex_str_of_field_class(dex, field));
             char *name = dex_str_of_field_name(dex, field);
             int src = (op >= DEX_INS_SPUT) ? unit >> 8 : a;
             int obj = b;
             if (op >= DEX_INS_SPUT)
-                stmt = pool_printf("<%s: %s %s> = %s", cls, ty, name, use_reg(body, src));
+                stmt = pool_printf("<%s: %s %s> = %s", cls, ty, name, dex_jimple_use_reg(body, src));
             else
-                stmt = pool_printf("%s.<%s: %s %s> = %s", use_reg(body, obj), cls, ty, name, use_reg(body, src));
-            emit_stmt(body, stmt);
+                stmt = pool_printf("%s.<%s: %s %s> = %s", dex_jimple_use_reg(body, obj), cls, ty, name, dex_jimple_use_reg(body, src));
+            dex_jimple_emit_stmt(body, stmt);
             break;
         }
         case DEX_INS_INVOKE_VIRTUAL:
@@ -807,7 +784,7 @@ static void emit_one(jimple_body *body, int i)
                 }
                 flush_invoke(body);
                 if (strcmp(ret, "void") == 0)
-                    emit_stmt(body, expr);
+                    dex_jimple_emit_stmt(body, expr);
                 else {
                     body->pending_type = ret;
                     body->pending_invoke = expr;
@@ -851,10 +828,10 @@ static void emit_one(jimple_body *body, int i)
             int src1 = code->insns[i + 1] & 0xFF;
             int src2 = code->insns[i + 1] >> 8;
             char *ty = result_type_for_binop(op);
-            char *left = use_reg(body, src1);
-            char *right = use_reg(body, src2);
+            char *left = dex_jimple_use_reg(body, src1);
+            char *right = dex_jimple_use_reg(body, src2);
             dest = def_reg(body, dst, ty);
-            emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, binop(op), right));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, binop(op), right));
             break;
         }
         case DEX_INS_ADD_INT_2ADDR:
@@ -890,10 +867,10 @@ static void emit_one(jimple_body *body, int i)
         case DEX_INS_DIV_DOUBLE_2ADDR:
         case DEX_INS_REM_DOUBLE_2ADDR: {
             char *ty = result_type_for_binop(op);
-            char *left = use_reg(body, a);
-            char *right = use_reg(body, b);
+            char *left = dex_jimple_use_reg(body, a);
+            char *right = dex_jimple_use_reg(body, b);
             dest = def_reg(body, a, ty);
-            emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, binop(op), right));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, binop(op), right));
             break;
         }
         case DEX_INS_ADD_INT_LIT8:
@@ -927,12 +904,12 @@ static void emit_one(jimple_body *body, int i)
                 src = b;
                 lit = (s2)code->insns[i + 1];
             }
-            char *source = use_reg(body, src);
+            char *source = dex_jimple_use_reg(body, src);
             dest = def_reg(body, dst, "int");
             if (op == DEX_INS_RSUB_INT || op == DEX_INS_RSUB_INT_LIT8)
-                emit_stmt(body, pool_printf("%s = %d - %s", dest, lit, source));
+                dex_jimple_emit_stmt(body, pool_printf("%s = %d - %s", dest, lit, source));
             else
-                emit_stmt(body, pool_printf("%s = %s %s %d", dest, source, binop(op), lit));
+                dex_jimple_emit_stmt(body, pool_printf("%s = %s %s %d", dest, source, binop(op), lit));
             break;
         }
         case DEX_INS_NEG_INT:
@@ -943,16 +920,16 @@ static void emit_one(jimple_body *body, int i)
         case DEX_INS_NEG_DOUBLE: {
             int dst = a;
             int src = b;
-            char *source = use_reg(body, src);
+            char *source = dex_jimple_use_reg(body, src);
             char *ty = (op == DEX_INS_NEG_LONG || op == DEX_INS_NOT_LONG) ? "long" :
                        (op == DEX_INS_NEG_FLOAT) ? "float" :
                        (op == DEX_INS_NEG_DOUBLE) ? "double" : "int";
             dest = def_reg(body, dst, ty);
             if (op == DEX_INS_NOT_INT || op == DEX_INS_NOT_LONG)
-                emit_stmt(body, pool_printf("%s = %s ^ %s", dest, source,
+                dex_jimple_emit_stmt(body, pool_printf("%s = %s ^ %s", dest, source,
                                             strcmp(ty, "long") == 0 ? "-1L" : "-1"));
             else
-                emit_stmt(body, pool_printf("%s = neg %s", dest, source));
+                dex_jimple_emit_stmt(body, pool_printf("%s = neg %s", dest, source));
             break;
         }
         case DEX_INS_INT_TO_LONG:
@@ -972,7 +949,7 @@ static void emit_one(jimple_body *body, int i)
         case DEX_INS_INT_TO_SHORT: {
             int dst = a;
             int src = b;
-            char *source = use_reg(body, src);
+            char *source = dex_jimple_use_reg(body, src);
             char *ty = "int";
             if (op == DEX_INS_INT_TO_LONG || op == DEX_INS_FLOAT_TO_LONG || op == DEX_INS_DOUBLE_TO_LONG)
                 ty = "long";
@@ -987,43 +964,43 @@ static void emit_one(jimple_body *body, int i)
             else if (op == DEX_INS_INT_TO_SHORT)
                 ty = "short";
             dest = def_reg(body, dst, ty);
-            emit_stmt(body, pool_printf("%s = (%s) %s", dest, ty, source));
+            dex_jimple_emit_stmt(body, pool_printf("%s = (%s) %s", dest, ty, source));
             break;
         }
         case DEX_INS_NEW_INSTANCE: {
-            char *ty = jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
+            char *ty = dex_jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
             dest = def_reg(body, unit >> 8, ty);
-            emit_stmt(body, pool_printf("%s = new %s", dest, ty));
+            dex_jimple_emit_stmt(body, pool_printf("%s = new %s", dest, ty));
             break;
         }
         case DEX_INS_CHECK_CAST: {
-            char *ty = jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
-            char *src = use_reg(body, unit >> 8);
+            char *ty = dex_jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
+            char *src = dex_jimple_use_reg(body, unit >> 8);
             dest = def_reg(body, unit >> 8, ty);
-            emit_stmt(body, pool_printf("%s = (%s) %s", dest, ty, src));
+            dex_jimple_emit_stmt(body, pool_printf("%s = (%s) %s", dest, ty, src));
             break;
         }
         case DEX_INS_INSTANCE_OF: {
-            char *ty = jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
-            char *source = use_reg(body, b);
+            char *ty = dex_jimple_type(dex_str_of_type_id(dex, code->insns[i + 1]));
+            char *source = dex_jimple_use_reg(body, b);
             dest = def_reg(body, a, "boolean");
-            emit_stmt(body, pool_printf("%s = %s instanceof %s", dest, source, ty));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s instanceof %s", dest, source, ty));
             break;
         }
         case DEX_INS_ARRAY_LENGTH: {
-            char *source = use_reg(body, b);
+            char *source = dex_jimple_use_reg(body, b);
             dest = def_reg(body, a, "int");
-            emit_stmt(body, pool_printf("%s = lengthof %s", dest, source));
+            dex_jimple_emit_stmt(body, pool_printf("%s = lengthof %s", dest, source));
             break;
         }
         case DEX_INS_THROW:
-            emit_stmt(body, pool_printf("throw %s", use_reg(body, unit >> 8)));
+            dex_jimple_emit_stmt(body, pool_printf("throw %s", dex_jimple_use_reg(body, unit >> 8)));
             break;
         case DEX_INS_MONITOR_ENTER:
-            emit_stmt(body, pool_printf("entermonitor %s", use_reg(body, unit >> 8)));
+            dex_jimple_emit_stmt(body, pool_printf("entermonitor %s", dex_jimple_use_reg(body, unit >> 8)));
             break;
         case DEX_INS_MONITOR_EXIT:
-            emit_stmt(body, pool_printf("exitmonitor %s", use_reg(body, unit >> 8)));
+            dex_jimple_emit_stmt(body, pool_printf("exitmonitor %s", dex_jimple_use_reg(body, unit >> 8)));
             break;
         case DEX_INS_AGET:
         case DEX_INS_AGET_WIDE:
@@ -1037,10 +1014,10 @@ static void emit_one(jimple_body *body, int i)
             int idx = code->insns[i + 1] >> 8;
             char *ty = op == DEX_INS_AGET_OBJECT ? "java.lang.Object" :
                        op == DEX_INS_AGET_WIDE ? "long" : "int";
-            char *array = use_reg(body, arr);
-            char *index = use_reg(body, idx);
+            char *array = dex_jimple_use_reg(body, arr);
+            char *index = dex_jimple_use_reg(body, idx);
             dest = def_reg(body, dst, ty);
-            emit_stmt(body, pool_printf("%s = %s[%s]", dest, array, index));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s[%s]", dest, array, index));
             break;
         }
         case DEX_INS_APUT:
@@ -1053,16 +1030,16 @@ static void emit_one(jimple_body *body, int i)
             int src = unit >> 8;
             int arr = code->insns[i + 1] & 0xFF;
             int idx = code->insns[i + 1] >> 8;
-            emit_stmt(body, pool_printf("%s[%s] = %s", use_reg(body, arr), use_reg(body, idx), use_reg(body, src)));
+            dex_jimple_emit_stmt(body, pool_printf("%s[%s] = %s", dex_jimple_use_reg(body, arr), dex_jimple_use_reg(body, idx), dex_jimple_use_reg(body, src)));
             break;
         }
         case DEX_INS_NEW_ARRAY: {
             const char *desc = dex_str_of_type_id(dex, code->insns[i + 1]);
-            char *arr = jimple_type(desc);
-            char *elem = (desc != NULL && desc[0] == '[') ? jimple_type(desc + 1) : arr;
-            char *size = use_reg(body, b);
+            char *arr = dex_jimple_type(desc);
+            char *elem = (desc != NULL && desc[0] == '[') ? dex_jimple_type(desc + 1) : arr;
+            char *size = dex_jimple_use_reg(body, b);
             dest = def_reg(body, a, arr);
-            emit_stmt(body, pool_printf("%s = newarray (%s)[%s]", dest, elem, size));
+            dex_jimple_emit_stmt(body, pool_printf("%s = newarray (%s)[%s]", dest, elem, size));
             break;
         }
         case DEX_INS_CMP_LONG:
@@ -1075,18 +1052,18 @@ static void emit_one(jimple_body *body, int i)
             int s2 = code->insns[i + 1] >> 8;
             const char *which = op == DEX_INS_CMP_LONG ? "cmp" :
                                 (op == DEX_INS_CMPG_FLOAT || op == DEX_INS_CMPG_DOUBLE) ? "cmpg" : "cmpl";
-            char *left = use_reg(body, s1);
-            char *right = use_reg(body, s2);
+            char *left = dex_jimple_use_reg(body, s1);
+            char *right = dex_jimple_use_reg(body, s2);
             dest = def_reg(body, dst, "int");
-            emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, which, right));
+            dex_jimple_emit_stmt(body, pool_printf("%s = %s %s %s", dest, left, which, right));
             break;
         }
         case DEX_INS_PACKED_SWITCH:
         case DEX_INS_SPARSE_SWITCH:
-            emit_switch(body, i);
+            dex_jimple_emit_switch(body, i);
             break;
         case DEX_INS_FILL_ARRAY_DATA:
-            emit_fill_array(body, i);
+            dex_jimple_emit_fill_array(body, i);
             break;
         case DEX_INS_FILLED_NEW_ARRAY:
         case DEX_INS_FILLED_NEW_ARRAY_RANGE:
@@ -1130,37 +1107,34 @@ static void emit_one(jimple_body *body, int i)
 static void scan_labels(jimple_body *body)
 {
     dex_code_item *code = body->code;
-    int i;
-    for (i = 0; i < (int)code->insns_size; ) {
+    for (int index = 0; index < body->analysis->ssa->instruction_count; index++) {
+        jd_ins *instruction = lget_obj(body->analysis->method->instructions, index);
+        int i = (int)instruction->offset;
         u2 raw = code->insns[i];
         u1 op = raw & 0xFF;
-        int len = dex_opcode_len(op);
         if (raw == 0x0100 || raw == 0x0200 || raw == 0x0300)
-            break;
+            continue;
         if (op == DEX_INS_GOTO || op == DEX_INS_GOTO_16 || op == DEX_INS_GOTO_32 ||
-            (op >= DEX_INS_IF_EQ && op <= DEX_INS_IF_LEZ) ||
-            op == DEX_INS_PACKED_SWITCH || op == DEX_INS_SPARSE_SWITCH ||
-            op == DEX_INS_FILL_ARRAY_DATA)
-            mark_label(body, branch_target(op, code, i));
+            (op >= DEX_INS_IF_EQ && op <= DEX_INS_IF_LEZ))
+            dex_jimple_mark_label(body, branch_target(op, code, i));
         if (op == DEX_INS_PACKED_SWITCH || op == DEX_INS_SPARSE_SWITCH) {
             int target = branch_target(op, code, i);
             int size;
             int k;
-            if (target >= 0 && target + 1 < (int)code->insns_size) {
+            dex_jimple_mark_label(body, i + instruction->param_length);
+            if (target >= 0 && target + 1 < (int)code->insns_size &&
+                dex_instruction_width(code, (u4)target) != 0) {
                 size = code->insns[target + 1];
                 if (code->insns[target] == 0x0100) {
                     for (k = 0; k < size; k++)
-                        mark_label(body, i + read_s4(code, target + 4 + k * 2));
+                        dex_jimple_mark_label(body, i + read_s4(code, target + 4 + k * 2));
                 } else if (code->insns[target] == 0x0200) {
                     int tgts = target + 2 + size * 2;
                     for (k = 0; k < size; k++)
-                        mark_label(body, i + read_s4(code, tgts + k * 2));
+                        dex_jimple_mark_label(body, i + read_s4(code, tgts + k * 2));
                 }
             }
         }
-        if (len <= 0)
-            len = 1;
-        i += len;
     }
     if (code->handlers != NULL) {
         int h;
@@ -1169,16 +1143,16 @@ static void scan_labels(jimple_body *body)
             int k;
             int n = abs(handler->size);
             for (k = 0; k < n; k++)
-                mark_label(body, (int)handler->handlers[k].addr);
+                dex_jimple_mark_label(body, (int)handler->handlers[k].addr);
             if (handler->size <= 0)
-                mark_label(body, (int)handler->catch_all_addr);
+                dex_jimple_mark_label(body, (int)handler->catch_all_addr);
         }
     }
     if (code->tries != NULL) {
         int t;
         for (t = 0; t < code->tries_size; t++) {
-            mark_label(body, (int)code->tries[t].start_addr);
-            mark_label(body, (int)(code->tries[t].start_addr + code->tries[t].insn_count));
+            dex_jimple_mark_label(body, (int)code->tries[t].start_addr);
+            dex_jimple_mark_label(body, (int)(code->tries[t].start_addr + code->tries[t].insn_count));
         }
     }
 }
@@ -1205,7 +1179,7 @@ static void emit_ignored_handlers(jimple_body *body)
                 continue;
             emitted[unit] = 1;
             char *local = pool_printf("caught_%u", unit);
-            remember_local(body, local, "java.lang.Throwable");
+            dex_jimple_remember_local(body, local, "java.lang.Throwable");
             add_line(body, pool_printf("%s:", catch_label(body, unit)));
             add_line(body, pool_printf("%s := @caughtexception;", local));
             add_line(body, pool_printf("goto label_%u;", unit));
@@ -1230,14 +1204,14 @@ static void emit_catches(jimple_body *body)
                 continue;
             n = abs(handler->size);
             for (k = 0; k < n; k++) {
-                char *ty = jimple_type(dex_str_of_type_id(body->dex, handler->handlers[k].type_idx));
+                char *ty = dex_jimple_type(dex_str_of_type_id(body->dex, handler->handlers[k].type_idx));
                 add_line(body, pool_printf(
                         "catch %s from label_%u to label_%u with %s;",
                         ty, item->start_addr,
                         item->start_addr + item->insn_count,
                         catch_label(body, handler->handlers[k].addr)));
-                mark_label(body, (int)item->start_addr);
-                mark_label(body, (int)(item->start_addr + item->insn_count));
+                dex_jimple_mark_label(body, (int)item->start_addr);
+                dex_jimple_mark_label(body, (int)(item->start_addr + item->insn_count));
             }
             if (handler->size <= 0) {
                 add_line(body, pool_printf(
@@ -1252,91 +1226,6 @@ static void emit_catches(jimple_body *body)
 static s4 read_s4(const dex_code_item *code, int unit)
 {
     return (s4)((u4)code->insns[unit] | ((u4)code->insns[unit + 1] << 16));
-}
-
-static void emit_switch(jimple_body *body, int i)
-{
-    dex_code_item *code = body->code;
-    int target = branch_target(code->insns[i] & 0xFF, code, i);
-    int reg = code->insns[i] >> 8;
-    u2 ident;
-    int size;
-    int k;
-    char *text;
-
-    if (target < 0 || target + 1 >= (int)code->insns_size)
-        return;
-    ident = code->insns[target];
-    size = code->insns[target + 1];
-    text = pool_printf("lookupswitch(%s)\n        {", use_reg(body, reg));
-    if (ident == 0x0100) {
-        s4 first = read_s4(code, target + 2);
-        for (k = 0; k < size; k++) {
-            s4 rel = read_s4(code, target + 4 + k * 2);
-            int dest = i + rel;
-            mark_label(body, dest);
-            text = pool_printf("%s\n            case %d: goto label_%d;", text, first + k, dest);
-        }
-    } else if (ident == 0x0200) {
-        int keys = target + 2;
-        int tgts = keys + size * 2;
-        for (k = 0; k < size; k++) {
-            s4 key = read_s4(code, keys + k * 2);
-            s4 rel = read_s4(code, tgts + k * 2);
-            int dest = i + rel;
-            mark_label(body, dest);
-            text = pool_printf("%s\n            case %d: goto label_%d;", text, key, dest);
-        }
-    }
-    text = pool_printf("%s\n            default: goto label_%d;\n        }", text, i + dex_opcode_len(code->insns[i] & 0xFF));
-    mark_label(body, i + dex_opcode_len(code->insns[i] & 0xFF));
-    emit_stmt(body, text);
-}
-
-static void emit_fill_array(jimple_body *body, int i)
-{
-    dex_code_item *code = body->code;
-    int target = branch_target(DEX_INS_FILL_ARRAY_DATA, code, i);
-    int reg = code->insns[i] >> 8;
-    u2 width;
-    u4 size;
-    u4 k;
-
-    if (target < 0 || target + 4 >= (int)code->insns_size)
-        return;
-    if (code->insns[target] != 0x0300)
-        return;
-    width = code->insns[target + 1];
-    size = (u4)code->insns[target + 2] | ((u4)code->insns[target + 3] << 16);
-    if (width != 1 && width != 2 && width != 4 && width != 8) {
-        fprintf(stderr, "jimple_array_payload_width width=%u\n", width);
-        body->failed = 1;
-        return;
-    }
-    {
-        int data = target + 4;
-        for (k = 0; k < size; k++) {
-            s8 value = 0;
-            int at = data + (int)((k * width) / 2);
-            int units = width / 2;
-            if (units < 1)
-                units = 1;
-            if (at < 0 || at + units > (int)code->insns_size)
-                break;
-            if (width == 1)
-                value = (k & 1) ? (code->insns[at] >> 8) : (code->insns[at] & 0xFF);
-            else if (width == 2)
-                value = (s2)code->insns[at];
-            else if (width == 4)
-                value = read_s4(code, at);
-            else
-                value = (s8)((u4)code->insns[at] | ((u8)code->insns[at + 1] << 16) |
-                             ((u8)code->insns[at + 2] << 32) | ((u8)code->insns[at + 3] << 48));
-            emit_stmt(body, pool_printf("%s[%u] = %s", use_reg(body, reg), k,
-                                        width == 8 ? dex_jimple_long_literal(value).text
-                                                   : pool_printf("%lld", (long long)value)));
-        }
-    }
 }
 
 static u4 encoded_index(encoded_value *value)
@@ -1398,7 +1287,7 @@ static void emit_special_invoke(jimple_body *body, int i)
         expr = pool_printf("virtualinvoke %s.%s(%s)", base, sig, rest);
         flush_invoke(body);
         if (strcmp(ret, "void") == 0)
-            emit_stmt(body, expr);
+            dex_jimple_emit_stmt(body, expr);
         else {
             body->pending_type = ret;
             body->pending_invoke = expr;
@@ -1422,14 +1311,14 @@ static void emit_special_invoke(jimple_body *body, int i)
             u4 proto_idx = encoded_index(&site->values[2]);
             if (proto_idx < dex->header->proto_ids_size) {
                 dex_proto_id *p = &dex->proto_ids[proto_idx];
-                char *ret = jimple_type(dex_str_of_type_id(dex, p->return_type_idx));
+                char *ret = dex_jimple_type(dex_str_of_type_id(dex, p->return_type_idx));
                 char *params = x_alloc(1);
                 int pi;
                 params[0] = '\0';
                 if (p->type_list != NULL) {
                     for (pi = 0; pi < (int)p->type_list->size; pi++) {
                         params = pool_printf("%s%s%s", params, pi == 0 ? "" : ",",
-                                              jimple_type(dex_str_of_type_id(dex, p->type_list->list[pi].type_idx)));
+                                              dex_jimple_type(dex_str_of_type_id(dex, p->type_list->list[pi].type_idx)));
                     }
                 }
                 proto = pool_printf("<%s (%s)>", ret, params);
@@ -1481,8 +1370,11 @@ static void apply_cleanup(jimple_body *body)
             if (target == NULL)
                 continue;
             if (strncmp(target, "goto label_", 11) == 0) {
-                body->lines[i] = pool_printf("%.*s%s", (int)(goto_at - line), line, target);
-                changed = 1;
+                char *replacement = pool_printf("%.*s%s", (int)(goto_at - line), line, target);
+                if (strcmp(replacement, line) != 0) {
+                    body->lines[i] = replacement;
+                    changed = 1;
+                }
             } else if (strncmp(line, "goto label_", 11) == 0 && strncmp(target, "return", 6) == 0) {
                 body->lines[i] = pool_printf("%s", target);
                 changed = 1;
@@ -1515,7 +1407,7 @@ static void write_annotation_set_comment(FILE *stream, jd_meta_dex *dex,
             continue;
         annotation = item->encoded_annotation;
         fprintf(stream, "%s/* @%s", indent,
-                jimple_type(dex_str_of_type_id(dex, (u2)annotation->type_idx)));
+                dex_jimple_type(dex_str_of_type_id(dex, (u2)annotation->type_idx)));
         if (annotation->size > 0)
             fputc('(', stream);
         for (j = 0; annotation->elements != NULL && j < annotation->size; j++) {
@@ -1546,9 +1438,9 @@ static int emit_method(jd_meta_dex *dex, dex_class_def *cf, encoded_method *meth
     dex_code_item *code = method->code;
     dex_method_id *id = &dex->method_ids[method->method_id];
     dex_proto_id *proto = &dex->proto_ids[id->proto_idx];
-    char *ret = jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
+    char *ret = dex_jimple_type(dex_str_of_type_id(dex, proto->return_type_idx));
     char *name = dex_str_of_method_id(dex, method->method_id);
-    char *cls = jimple_type(dex_str_of_type_id(dex, cf->class_idx));
+    char *cls = dex_jimple_type(dex_str_of_type_id(dex, cf->class_idx));
     int instance = (method->access_flags & ACC_DEX_STATIC) == 0;
     int param_count = proto->type_list == NULL ? 0 : (int)proto->type_list->size;
     int i;
@@ -1586,7 +1478,7 @@ static int emit_method(jd_meta_dex *dex, dex_class_def *cf, encoded_method *meth
     for (i = 0; i < param_count; i++) {
         if (i != 0)
             fputc(',', stream);
-        fputs(jimple_type(dex_str_of_type_id(dex, proto->type_list->list[i].type_idx)), stream);
+        fputs(dex_jimple_type(dex_str_of_type_id(dex, proto->type_list->list[i].type_idx)), stream);
     }
     fputs(")", stream);
     if (code == NULL || (method->access_flags & (ACC_DEX_NATIVE | ACC_DEX_ABSTRACT)) != 0) {
@@ -1621,45 +1513,35 @@ static int emit_method(jd_meta_dex *dex, dex_class_def *cf, encoded_method *meth
             reg++;
         }
         for (p = 0; p < param_count; p++) {
-            char *ty = jimple_type(dex_str_of_type_id(dex, proto->type_list->list[p].type_idx));
+            char *ty = dex_jimple_type(dex_str_of_type_id(dex, proto->type_list->list[p].type_idx));
             char *local = def_reg(&body, reg, ty);
             add_line(&body, pool_printf("%s := @parameter%d: %s;", local, p, ty));
             reg += (strcmp(ty, "long") == 0 || strcmp(ty, "double") == 0) ? 2 : 1;
         }
     }
 
-    for (i = 0; i < (int)code->insns_size; ) {
+    for (int index = 0; index < body.analysis->ssa->instruction_count; index++) {
+        jd_ins *instruction = lget_obj(body.analysis->method->instructions, index);
+        i = (int)instruction->offset;
         u2 raw = code->insns[i];
-        u1 op = raw & 0xFF;
-        int len = dex_opcode_len(op);
-        if (raw == 0x0100 || raw == 0x0200 || raw == 0x0300)
-            break;
-        int index = body.analysis->offsets[i];
+        if (raw == 0x0100 || raw == 0x0200 || raw == 0x0300) {
+            if (body.labels[i])
+                add_line(&body, pool_printf("label_%d:", i));
+            continue;
+        }
         if (body.analysis->ssa->reachable[index]) {
             load_inputs(&body, i);
             emit_one(&body, i);
         } else if (body.labels[i]) {
             add_line(&body, pool_printf("label_%d:", i));
-            add_line(&body, pool_printf("goto label_%d;", i));
+            dex_jimple_emit_stmt(&body, "nop");
         }
-        if (len <= 0)
-            len = 1;
-        i += len;
     }
     flush_invoke(&body);
-    {
-        int label_at;
-        for (label_at = i; label_at < (int)code->insns_size; label_at++) {
-            if (body.labels[label_at]) {
-                add_line(&body, pool_printf("label_%d:", label_at));
-                add_line(&body, pool_printf("goto label_%d;", label_at));
-            }
-        }
-    }
-    if (body.end_label) {
+    if (body.end_label)
         add_line(&body, pool_printf("label_%u:", code->insns_size));
-        add_line(&body, pool_printf("goto label_%u;", code->insns_size));
-    }
+    if (body.nlines > 0 && line_is_label(body.lines[body.nlines - 1]))
+        dex_jimple_emit_stmt(&body, "nop");
     emit_ignored_handlers(&body);
     emit_catches(&body);
     apply_cleanup(&body);
@@ -1718,14 +1600,14 @@ static void write_field_modifiers(FILE *stream, u4 flags)
 
 int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
 {
-    char *cls = jimple_type(dex_str_of_type_id(dex, cf->class_idx));
+    char *cls = dex_jimple_type(dex_str_of_type_id(dex, cf->class_idx));
     char *super_name = NULL;
     string super_desc = dex_str_of_superclass(dex, cf);
     dex_class_data_item *data = cf->class_data;
     int i;
 
     if (super_desc != NULL && super_desc[0] != '\0')
-        super_name = jimple_type(super_desc);
+        super_name = dex_jimple_type(super_desc);
     write_class_modifiers(stream, cf->access_flags);
     if (cf->access_flags & ACC_DEX_INTERFACE)
         fprintf(stream, "interface %s", cls);
@@ -1737,7 +1619,7 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
         fputs(" implements ", stream);
         for (u4 n = 0; n < cf->interfaces->size; n++)
             fprintf(stream, "%s%s", n == 0 ? "" : ", ",
-                    jimple_type(dex_str_of_type_id(dex, cf->interfaces->list[n].type_idx)));
+                    dex_jimple_type(dex_str_of_type_id(dex, cf->interfaces->list[n].type_idx)));
     }
     fputs("\n{\n", stream);
     if (cf->annotations != NULL)
@@ -1757,7 +1639,7 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
             fputs("    ", stream);
             write_field_modifiers(stream, field->access_flags);
             fprintf(stream, "%s %s;\n",
-                    jimple_type(dex_field_desc(dex, field)),
+                    dex_jimple_type(dex_field_desc(dex, field)),
                     dex_field_name(dex, field));
         }
         for (i = 0; i < (int)data->instance_fields_size; i++) {
@@ -1774,7 +1656,7 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
             fputs("    ", stream);
             write_field_modifiers(stream, field->access_flags);
             fprintf(stream, "%s %s;\n",
-                    jimple_type(dex_field_desc(dex, field)),
+                    dex_jimple_type(dex_field_desc(dex, field)),
                     dex_field_name(dex, field));
         }
         for (i = 0; i < (int)data->direct_methods_size; i++) {

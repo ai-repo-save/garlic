@@ -131,6 +131,8 @@ static bool instruction_types(dex_analysis *a, jd_dex_ins *ins, const char *ret)
         return input(a, ins, x, "Ljava/lang/Object;");
     if (op == DEX_INS_THROW)
         return input(a, ins, x, "Ljava/lang/Throwable;");
+    if (op == DEX_INS_FILL_ARRAY_DATA)
+        return input(a, ins, x, "Ljava/lang/Object;");
     if (op == DEX_INS_CHECK_CAST) {
         changed |= input(a, ins, x, "Ljava/lang/Object;");
         changed |= output(a, ins, x, dex_str_of_type_id(a->dex, ins->param[1]));
@@ -229,6 +231,33 @@ static bool instruction_types(dex_analysis *a, jd_dex_ins *ins, const char *ret)
     return false;
 }
 
+static bool null_web(dex_analysis *a, int value)
+{
+    bool constant = false;
+    for (int d = 0; d < a->ssa->definition_count; d++) {
+        if (sform_register_root(a->ssa, d) != value)
+            continue;
+        int index = a->ssa->definitions[d].instruction;
+        if (index < 0)
+            return false;
+        jd_dex_ins *ins = lget_obj(a->method->instructions, index);
+        int op = ins->code;
+        if ((op >= DEX_INS_MOVE && op <= DEX_INS_MOVE_16) ||
+            (op >= DEX_INS_MOVE_OBJECT && op <= DEX_INS_MOVE_OBJECT_16))
+            continue;
+        if (op < DEX_INS_CONST_4 || op > DEX_INS_CONST_HIGH16)
+            return false;
+        u2 *words = &a->encoded->code->insns[ins->offset];
+        bool zero = op == DEX_INS_CONST_4 ? (words[0] >> 12) == 0 : words[1] == 0;
+        if (op == DEX_INS_CONST)
+            zero &= words[2] == 0;
+        if (!zero)
+            return false;
+        constant = true;
+    }
+    return constant;
+}
+
 void dex_analysis_types(dex_analysis *a)
 {
     jd_register_ssa *ssa = a->ssa;
@@ -270,6 +299,20 @@ void dex_analysis_types(dex_analysis *a)
         jd_dex_ins *ins = lget_obj(a->method->instructions, i);
         if (!ssa->reachable[i])
             continue;
+        if (ins->code == DEX_INS_FILL_ARRAY_DATA) {
+            int reg = (int)dex_ins_parameter(ins, 0);
+            int value = dex_analysis_input(a, ins->offset, reg);
+            s8 target = (s8)ins->offset + (s4)((u4)ins->param[1] | ((u4)ins->param[2] << 16));
+            if (value >= 0 && a->types[value].array == NULL && null_web(a, value) &&
+                target >= 0 && target + 1 < a->encoded->code->insns_size &&
+                a->encoded->code->insns[target] == 0x0300) {
+                u2 width = a->encoded->code->insns[target + 1];
+                const char *array = width == 1 ? "[B" : width == 2 ? "[S" :
+                                    width == 4 ? "[I" : width == 8 ? "[J" : NULL;
+                if (array != NULL)
+                    constrain(a, value, array);
+            }
+        }
         if (ins->code == DEX_INS_IF_EQ || ins->code == DEX_INS_IF_NE ||
             ins->code == DEX_INS_IF_EQZ || ins->code == DEX_INS_IF_NEZ) {
             int r = (int)dex_ins_parameter(ins, 0);
