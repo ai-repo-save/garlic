@@ -263,16 +263,28 @@ def mcp(binary, calls):
         }
         for i, (path, name) in enumerate(calls, 1)
     ]
+    command = [str(binary), "-m"]
     result = subprocess.run(
-        [str(binary), "-m"],
+        command,
         input="".join(json.dumps(m) + "\n" for m in messages),
         capture_output=True,
         text=True,
-        check=True,
+        check=False,
     )
-    replies = [json.loads(line) for line in result.stdout.splitlines()]
-    assert [r["id"] for r in replies] == list(range(1, len(calls) + 1)), replies
-    return [r["result"]["content"][0]["text"] for r in replies]
+    context = {
+        "command": command,
+        "requests": messages,
+        "exit_code": result.returncode,
+        "stdout": result.stdout,
+        "stderr": result.stderr,
+    }
+    assert result.returncode == 0, context
+    try:
+        replies = [json.loads(line) for line in result.stdout.splitlines()]
+        assert [r["id"] for r in replies] == list(range(1, len(calls) + 1)), context
+        return [r["result"]["content"][0]["text"] for r in replies]
+    except (json.JSONDecodeError, KeyError, IndexError, TypeError) as error:
+        raise AssertionError(context) from error
 
 
 def main():
@@ -299,7 +311,15 @@ def main():
             ],
         )
         assert text == descriptor_text, (text, descriptor_text)
-        assert missing == "Error: class not found: MissingClass", missing
+        absent = subprocess.run(
+            [str(args.garlic.resolve()), str(apk), "--jimple", "-c", "MissingClass"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert absent.returncode == 1, absent
+        assert missing.partition(":")[0].strip() == "Error", missing
+        assert missing.rpartition(":")[2].strip() == "MissingClass", missing
         # 0x3e is reserved by the DEX opcode table; reject it, with the actual site.
         invalid = root / "reserved.dex"
         invalid.write_bytes(dex_fixture([("reserved", "I", "I", [0x003E], [17], 17)]))
@@ -317,18 +337,27 @@ def main():
         )
         assert rejected.returncode == 2, rejected
         (failure,) = mcp(args.garlic.resolve(), [(invalid, "JimpleArithmetic")])
-        assert failure.splitlines()[0] == (
-            f"Error: jimple failed (exit=2; path={invalid}; class=JimpleArithmetic)"
-        ), failure
-        diagnostic = re.search(
-            r"event=dex_instruction_invalid op=(\d+) at=(\d+) method_id=(\d+)", failure
-        )
-        assert diagnostic is not None, failure
-        assert diagnostic.groups() == (
-            "62",
-            "1",
-            "0",
-        ), failure
+        header = failure.splitlines()[0]
+        assert header.partition(":")[0].strip() == "Error", failure
+        fields = dict(re.findall(r"\b(exit|path|class)=([^;)]+)", header))
+        assert {key: fields.get(key) for key in ("exit", "path", "class")} == {
+            "exit": "2",
+            "path": str(invalid),
+            "class": "JimpleArithmetic",
+        }, failure
+        diagnostics = [
+            dict(re.findall(r"\b(\w+)=([^\s;()]+)", line))
+            for line in failure.splitlines()
+        ]
+        sites = [
+            record
+            for record in diagnostics
+            if record.get("event") == "dex_instruction_invalid"
+        ]
+        assert [
+            {key: record.get(key) for key in ("op", "at", "method_id")}
+            for record in sites
+        ] == [{"op": "62", "at": "1", "method_id": "0"}], failure
         (root / "JimpleArithmetic.jimple").write_text(text)
         output = root / "classes"
         subprocess.run(
