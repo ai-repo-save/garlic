@@ -336,6 +336,29 @@ def main():
             check=False,
         )
         assert rejected.returncode == 2, rejected
+        invalid_apk = root / "reserved.apk"
+        with zipfile.ZipFile(invalid_apk, "w") as archive:
+            archive.write(invalid, "classes.dex")
+        for source in (invalid, invalid_apk):
+            for threads in (1, 4):
+                output = root / f"rejected-{source.suffix[1:]}-{threads}"
+                output.mkdir()
+                refused = subprocess.run(
+                    [
+                        str(args.garlic.resolve()),
+                        str(source),
+                        "-t",
+                        str(threads),
+                        "-o",
+                        str(output),
+                    ],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                    timeout=20,
+                )
+                assert refused.returncode == 1, refused
+                assert sorted(output.rglob("*")) == [], refused
         (failure,) = mcp(args.garlic.resolve(), [(invalid, "JimpleArithmetic")])
         header = failure.splitlines()[0]
         assert header.partition(":")[0].strip() == "Error", failure

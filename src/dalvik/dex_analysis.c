@@ -65,10 +65,7 @@ dex_analysis *dex_analyze_method(jd_meta_dex *meta, encoded_method *encoded)
     method->meta = dex;
     method->meta_method = encoded;
     analysis->method = method;
-    if (dex_method_init_code(method, encoded) != 0) {
-        analysis->failed = 1;
-        return analysis;
-    }
+    dex_method_init_code(method, encoded);
     int count = method->instructions->size;
     analysis->offsets = make_obj_arr(int, encoded->code->insns_size);
     jd_register_flow *flow = make_obj_arr(jd_register_flow, count);

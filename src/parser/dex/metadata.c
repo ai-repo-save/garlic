@@ -1136,6 +1136,10 @@ static void parse_dex_code_item(jd_meta_dex *dex, encoded_method *em)
         return;
     }
     code->insns = (u2 *) (dex->bin->buffer + dex->bin->cur_off);
+    if (dex_validate_instructions(code, em->method_id) != 0) {
+        dex_mark_invalid_reason(dex, "invalid instruction boundary");
+        return;
+    }
     setup_current_offset(dex, dex->bin->cur_off + sizeof(u2)*code->insns_size);
 
     parse_dex_code_try_item(dex, code);
@@ -1567,6 +1571,8 @@ jd_meta_dex* parse_dex_file(string path)
 
     if (dex->bin->overrun) {
         output_input_rejected(path, dex->bin->error);
+        pthread_mutex_destroy(&dex->lambda_lock);
+        mem_pool_free(pool);
         return NULL;
     }
     return dex;
@@ -1620,6 +1626,8 @@ jd_meta_dex* parse_dex_from_buffer(char *buffer, size_t size)
 
     if (meta->bin->overrun) {
         output_input_rejected(NULL, meta->bin->error);
+        pthread_mutex_destroy(&meta->lambda_lock);
+        mem_pool_free(pool);
         return NULL;
     }
     return meta;

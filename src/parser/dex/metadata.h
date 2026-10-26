@@ -11,6 +11,10 @@ string dex_opcode_name(u1 code);
 
 int dex_opcode_len(u1 code);
 
+int dex_instruction_width(const dex_code_item *code, u4 unit);
+
+int dex_validate_instructions(const dex_code_item *code, u4 method_id);
+
 int read_unsigned_leb128(jd_meta_dex *dex);
 
 int read_signed_leb128(jd_meta_dex *dex);

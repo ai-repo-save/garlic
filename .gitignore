@@ -24,4 +24,5 @@ cmake-build-release/
 !src/dalvik/dex_analysis_types.c
 !src/decompiler/ssa_registers.c
 !src/decompiler/ssa_registers.h
+!src/parser/dex/instruction.c
 !docs/bug-reports/apk-smali-lookup-memory.md

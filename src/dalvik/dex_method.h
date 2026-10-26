@@ -11,7 +11,7 @@ void dex_method_init(jsource_file *jf,
                      jd_method *m,
                      encoded_method *em);
 
-int dex_method_init_code(jd_method *m, encoded_method *em);
+void dex_method_init_code(jd_method *m, encoded_method *em);
 
 jd_val* dex_method_parameter_val(jd_method *m, int index);
 
