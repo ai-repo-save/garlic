@@ -80,6 +80,7 @@ typedef enum jd_dex_access_flags {
     ACC_DEX_SYNCHRONIZED            = 0x0020,
     ACC_DEX_VOLATILE                = 0x0040,
     ACC_DEX_VARARGS                 = 0x0080,
+    ACC_DEX_TRANSIENT               = 0x0080,
     ACC_DEX_NATIVE                  = 0x0100,
     ACC_DEX_INTERFACE               = 0x0200,
     ACC_DEX_ABSTRACT                = 0x0400,

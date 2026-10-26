@@ -1701,6 +1701,27 @@ static int emit_method(jd_meta_dex *dex, dex_class_def *cf, encoded_method *meth
     return body.failed ? 2 : 0;
 }
 
+static void write_class_modifiers(FILE *stream, u4 flags)
+{
+    if (flags & ACC_DEX_PUBLIC) fputs("public ", stream);
+    if (flags & ACC_DEX_FINAL) fputs("final ", stream);
+    if (flags & ACC_DEX_ABSTRACT) fputs("abstract ", stream);
+    if (flags & ACC_DEX_ANNOTATION) fputs("annotation ", stream);
+    if (flags & ACC_DEX_ENUM) fputs("enum ", stream);
+}
+
+static void write_field_modifiers(FILE *stream, u4 flags)
+{
+    if (flags & ACC_DEX_PUBLIC) fputs("public ", stream);
+    if (flags & ACC_DEX_PRIVATE) fputs("private ", stream);
+    if (flags & ACC_DEX_PROTECTED) fputs("protected ", stream);
+    if (flags & ACC_DEX_STATIC) fputs("static ", stream);
+    if (flags & ACC_DEX_FINAL) fputs("final ", stream);
+    if (flags & ACC_DEX_VOLATILE) fputs("volatile ", stream);
+    if (flags & ACC_DEX_TRANSIENT) fputs("transient ", stream);
+    if (flags & ACC_DEX_ENUM) fputs("enum ", stream);
+}
+
 int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
 {
     char *cls = jimple_type(dex_str_of_type_id(dex, cf->class_idx));
@@ -1711,13 +1732,19 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
 
     if (super_desc != NULL && super_desc[0] != '\0')
         super_name = jimple_type(super_desc);
-    fputs("public ", stream);
+    write_class_modifiers(stream, cf->access_flags);
     if (cf->access_flags & ACC_DEX_INTERFACE)
         fprintf(stream, "interface %s", cls);
     else
         fprintf(stream, "class %s", cls);
     if (super_name != NULL)
         fprintf(stream, " extends %s", super_name);
+    if (cf->interfaces != NULL && cf->interfaces->size != 0) {
+        fputs(" implements ", stream);
+        for (u4 n = 0; n < cf->interfaces->size; n++)
+            fprintf(stream, "%s%s", n == 0 ? "" : ", ",
+                    jimple_type(dex_str_of_type_id(dex, cf->interfaces->list[n].type_idx)));
+    }
     fputs("\n{\n", stream);
     if (cf->annotations != NULL)
         write_annotation_set_comment(stream, dex, cf->annotations->class_annotation, "    ");
@@ -1733,7 +1760,9 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
                                                      "    ");
                 }
             }
-            fprintf(stream, "    static %s %s;\n",
+            fputs("    ", stream);
+            write_field_modifiers(stream, field->access_flags);
+            fprintf(stream, "%s %s;\n",
                     jimple_type(dex_field_desc(dex, field)),
                     dex_field_name(dex, field));
         }
@@ -1748,7 +1777,9 @@ int dex_class_def_to_jimple(jd_meta_dex *dex, dex_class_def *cf, FILE *stream)
                                                      "    ");
                 }
             }
-            fprintf(stream, "    %s %s;\n",
+            fputs("    ", stream);
+            write_field_modifiers(stream, field->access_flags);
+            fprintf(stream, "%s %s;\n",
                     jimple_type(dex_field_desc(dex, field)),
                     dex_field_name(dex, field));
         }
