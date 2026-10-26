@@ -72,6 +72,8 @@ public final class StrictCorpusConsumer {
             var cls = Scene.v().forceResolve(name, SootClass.BODIES);
             cls.setApplicationClass(); classes.put(name, cls);
         }
+        // Jimple parsing leaves soot.dummy.InvokeDynamic at DANGLING. Soot 4.6 requires SIGNATURES before use.
+        Scene.v().addBasicClass(SootClass.INVOKEDYNAMIC_DUMMY_CLASS_NAME, SootClass.SIGNATURES);
         Scene.v().loadNecessaryClasses();
         var failures = new ArrayList<Throwable>();
         for (var original : dex.getClasses()) {
