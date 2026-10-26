@@ -5,9 +5,9 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
-#include <math.h>
 
 #include "dalvik/dex_analysis.h"
+#include "dalvik/dex_jimple_literals.h"
 
 #include "dalvik/dex_ins_helper.h"
 #include "dalvik/dex_meta_helper.h"
@@ -68,39 +68,6 @@ static char *pool_printf(const char *fmt, ...)
     va_start(ap, fmt);
     vsnprintf(out, (size_t)n + 1, fmt, ap);
     va_end(ap);
-    return out;
-}
-
-static char *jimple_long_literal(s8 value)
-{
-    if (value == INT64_MIN)
-        return "(-9223372036854775807L - 1L)";
-    return pool_printf("%lldL", (long long)value);
-}
-
-static char *jimple_string(const char *text)
-{
-    size_t n = text == NULL ? 0 : strlen(text);
-    char *out = x_alloc(n * 4 + 3);
-    size_t i;
-    size_t w = 0;
-    out[w++] = '"';
-    for (i = 0; i < n; i++) {
-        unsigned char c = (unsigned char)text[i];
-        if (c == '\\' || c == '"') {
-            out[w++] = '\\';
-            out[w++] = (char)c;
-        } else if (c == '\n') {
-            out[w++] = '\\';
-            out[w++] = 'n';
-        } else if (c < 0x20 || c == 0x7f) {
-            w += (size_t)sprintf(out + w, "\\u%04x", c);
-        } else {
-            out[w++] = (char)c;
-        }
-    }
-    out[w++] = '"';
-    out[w] = '\0';
     return out;
 }
 
@@ -501,26 +468,6 @@ static void emit_stmt(jimple_body *body, const char *stmt)
     add_line(body, pool_printf("%s;", stmt));
 }
 
-static char *floating_literal(u8 bits, unsigned kind)
-{
-    double number;
-    if (kind == DEX_VALUE_FLOAT) {
-        u4 word = (u4)bits;
-        float value;
-        memcpy(&value, &word, sizeof(value));
-        number = value;
-    } else {
-        memcpy(&number, &bits, sizeof(number));
-    }
-    const char *suffix = kind == DEX_VALUE_FLOAT ? "F" : "";
-    if (isnan(number))
-        return pool_printf("#NaN%s", suffix);
-    if (isinf(number))
-        return pool_printf("#%sInfinity%s", signbit(number) ? "-" : "", suffix);
-    char *text = pool_printf(kind == DEX_VALUE_FLOAT ? "%.9g" : "%.17g", number);
-    return pool_printf("%s%s%s", text, strpbrk(text, ".eE") == NULL ? ".0" : "", suffix);
-}
-
 static void emit_constant(jimple_body *body, int reg, u8 bits)
 {
     int value = dex_analysis_output(body->analysis, body->unit, reg);
@@ -540,9 +487,9 @@ static void emit_constant(jimple_body *body, int reg, u8 bits)
             }
             literal = "null";
         } else if (kind == DEX_VALUE_FLOAT || kind == DEX_VALUE_DOUBLE)
-            literal = floating_literal(bits, kind);
+            literal = dex_jimple_floating_literal(bits, kind == DEX_VALUE_FLOAT ? 32 : 64).text;
         else if (kind == DEX_VALUE_LONG)
-            literal = jimple_long_literal((s8)bits);
+            literal = dex_jimple_long_literal((s8)bits).text;
         else
             literal = pool_printf("%d", (s4)bits);
         emit_stmt(body, pool_printf("%s = %s", value_local(body, reg, value, kind), literal));
@@ -702,13 +649,13 @@ static void emit_one(jimple_body *body, int i)
                      ((u4)code->insns[i + 1] | ((u4)code->insns[i + 2] << 16));
             int dst = op == DEX_INS_CONST_STRING ? unit >> 8 : unit >> 8;
             dest = def_reg(body, dst, "java.lang.String");
-            emit_stmt(body, pool_printf("%s = %s", dest, jimple_string(dex_str_of_idx(dex, idx))));
+            emit_stmt(body, pool_printf("%s = %s", dest, dex_jimple_string(dex_str_of_idx(dex, idx))));
             break;
         }
         case DEX_INS_CONST_CLASS: {
             char *desc = dex_str_of_type_id(dex, code->insns[i + 1]);
             dest = def_reg(body, unit >> 8, "java.lang.Class");
-            emit_stmt(body, pool_printf("%s = class %s", dest, jimple_string(desc)));
+            emit_stmt(body, pool_printf("%s = class %s", dest, dex_jimple_string(desc)));
             break;
         }
         case DEX_INS_IF_EQ:
@@ -1386,7 +1333,7 @@ static void emit_fill_array(jimple_body *body, int i)
                 value = (s8)((u4)code->insns[at] | ((u8)code->insns[at + 1] << 16) |
                              ((u8)code->insns[at + 2] << 32) | ((u8)code->insns[at + 3] << 48));
             emit_stmt(body, pool_printf("%s[%u] = %s", use_reg(body, reg), k,
-                                        width == 8 ? jimple_long_literal(value)
+                                        width == 8 ? dex_jimple_long_literal(value).text
                                                    : pool_printf("%lld", (long long)value)));
         }
     }
