@@ -43,6 +43,13 @@ public final class StrictConsumer {
         return result;
     }
 
+    private static Map<String, Boolean> inventory(SootClass cls) {
+        var result = new TreeMap<String, Boolean>();
+        for (SootMethod method : List.copyOf(cls.getMethods()))
+            result.put(method.getSignature(), method.isConcrete());
+        return result;
+    }
+
     public static void main(String[] args) throws Exception {
         String mode = args[0], name = args[2];
         var expected = inventory(Path.of(args[1]), name);
@@ -64,10 +71,11 @@ public final class StrictConsumer {
         cls.setApplicationClass();
         Scene.v().loadNecessaryClasses();
         if (cls.isPhantom()) throw new AssertionError("Requested class is phantom: " + name);
-        var actual = new TreeMap<String, Boolean>();
+        // Soot may add unresolved-method stubs while retrieving an original body.
+        var targets = List.copyOf(cls.getMethods()).stream()
+            .filter(method -> expected.containsKey(method.getSignature())).toList();
         var failures = new ArrayList<Throwable>();
-        for (SootMethod method : cls.getMethods()) {
-            actual.put(method.getSignature(), method.isConcrete());
+        for (SootMethod method : targets) {
             if (!method.isConcrete()) continue;
             System.err.println("validate=" + method.getSignature());
             try {
@@ -79,6 +87,7 @@ public final class StrictConsumer {
                 failure.printStackTrace(System.err);
             }
         }
+        var actual = inventory(cls);
         if (!actual.equals(expected))
             throw new AssertionError("Method inventory mismatch: " + actual + " != " + expected);
         if (!failures.isEmpty()) {
@@ -87,8 +96,11 @@ public final class StrictConsumer {
             throw failure;
         }
         PackManager.v().runPacks();
-        for (SootMethod method : cls.getMethods())
+        for (SootMethod method : targets)
             if (method.isConcrete()) method.getActiveBody().validate();
+        actual = inventory(cls);
+        if (!actual.equals(expected))
+            throw new AssertionError("Post-pack method inventory mismatch: " + actual + " != " + expected);
         PackManager.v().writeOutput();
         Path output = Path.of(args[4], name.replace('.', '/') + ".class");
         var bytecode = new TreeMap<String, Boolean>();
