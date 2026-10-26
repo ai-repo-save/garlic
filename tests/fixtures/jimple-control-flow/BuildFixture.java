@@ -7,6 +7,7 @@ import org.jf.dexlib2.Opcodes;
 import org.jf.dexlib2.builder.MethodImplementationBuilder;
 import org.jf.dexlib2.builder.instruction.*;
 import org.jf.dexlib2.immutable.*;
+import org.jf.dexlib2.immutable.reference.ImmutableMethodReference;
 import org.jf.dexlib2.immutable.reference.ImmutableStringReference;
 
 /** DEX operands follow https://source.android.com/docs/core/runtime/dalvik-bytecode. */
@@ -207,6 +208,38 @@ public final class BuildFixture {
         b.addLabel("done");
         b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 0));
         method("typeLoop", "I", List.of("I"), b);
+
+        b = new MethodImplementationBuilder(10); // selector=v6, divisor=v7, value=v8/v9
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 1, 0));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 3,
+            new ImmutableStringReference("high-word")));
+        b.addInstruction(new BuilderInstruction21t(Opcode.IF_EQZ, 3, b.getLabel("integer")));
+        b.addInstruction(new BuilderInstruction21t(Opcode.IF_LTZ, 6, b.getLabel("overwrite")));
+        b.addLabel("integer");
+        b.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 3, 257));
+        b.addInstruction(new BuilderInstruction12x(Opcode.MOVE, 1, 3));
+        b.addLabel("start");
+        b.addInstruction(new BuilderInstruction23x(Opcode.DIV_INT, 0, 6, 7));
+        b.addLabel("end");
+        b.addInstruction(new BuilderInstruction10t(Opcode.GOTO, b.getLabel("overwrite")));
+        b.addLabel("handler");
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_EXCEPTION, 0));
+        b.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 3, 511));
+        b.addInstruction(new BuilderInstruction12x(Opcode.MOVE, 1, 3));
+        b.addLabel("overwrite");
+        b.addInstruction(new BuilderInstruction35c(Opcode.INVOKE_STATIC, 3, 8, 9, 6, 0, 0,
+            new ImmutableMethodReference("Ljava/lang/Long;", "rotateLeft", List.of("J", "I"), "J")));
+        // The incoming v3 may be a reference or integer; move-result-wide replaces both words.
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_WIDE, 2));
+        b.addInstruction(new BuilderInstruction35c(Opcode.INVOKE_STATIC, 2, 2, 3, 0, 0, 0,
+            new ImmutableMethodReference("Ljava/lang/Long;", "reverseBytes", List.of("J"), "J")));
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_WIDE, 4));
+        b.addInstruction(new BuilderInstruction12x(Opcode.INT_TO_LONG, 0, 1));
+        b.addInstruction(new BuilderInstruction23x(Opcode.ADD_LONG, 4, 4, 0));
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN_WIDE, 4));
+        b.addCatch("Ljava/lang/ArithmeticException;", b.getLabel("start"),
+            b.getLabel("end"), b.getLabel("handler"));
+        method("wideHighClobber", "J", List.of("I", "I", "J"), b);
 
         var cls = new ImmutableClassDef("LControlFlow;", 0x1, "Ljava/lang/Object;",
             List.of(), "BuildFixture.java", Set.of(), List.of(), METHODS);

@@ -1,5 +1,9 @@
 {
   "authority": "https://source.android.com/docs/core/runtime/dalvik-bytecode",
+  "wideHighClobberAuthorities": [
+    "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Long.html#rotateLeft(long,int)",
+    "https://docs.oracle.com/en/java/javase/21/docs/api/java.base/java/lang/Long.html#reverseBytes(long)"
+  ],
   "coverage": {
     "branch": ["conditional successors", "join of two reaching definitions"],
     "loop": ["back edge", "loop-carried index and accumulator"],
@@ -12,7 +16,8 @@
     "exceptionState": ["throwing destination preserves pre-instruction state on exception edge"],
     "nested": ["nested exception paths", "typed handler before catch-all", "catch-all handler", "multiple protected ranges sharing one handler"],
     "nullJoin": ["null/reference reaching-definition join", "reference condition after join"],
-    "typeLoop": ["loop register reuse across reference/integer definitions"]
+    "typeLoop": ["loop register reuse across reference/integer definitions"],
+    "wideHighClobber": ["high destination word previously reference or nonzero integer", "branch/handler definitions killed by move-result-wide", "both wide argument words consumed by real static invoke", "catch-path marker preserved separately", "nonzero and signed high words"]
   },
   "cases": [
     {"id": "branch-negative", "method": "branch", "parameters": ["I"], "arguments": [-1], "expected": "I:23"},
@@ -57,6 +62,17 @@
     {"id": "null-join-null", "method": "nullJoin", "parameters": ["I"], "arguments": [0], "expected": "I:29"},
     {"id": "null-join-reference", "method": "nullJoin", "parameters": ["I"], "arguments": [1], "expected": "I:47"},
     {"id": "type-loop-empty", "method": "typeLoop", "parameters": ["I"], "arguments": [0], "expected": "I:0"},
-    {"id": "type-loop-repeat", "method": "typeLoop", "parameters": ["I"], "arguments": [5], "expected": "I:5"}
+    {"id": "type-loop-repeat", "method": "typeLoop", "parameters": ["I"], "arguments": [5], "expected": "I:5"},
+    {"id": "wide-high-reference", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [-1, 0, 1], "expected": "J:128"},
+    {"id": "wide-high-integer", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 1, 1], "expected": "J:72057594037928193"},
+    {"id": "wide-high-handler", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 0, 1], "expected": "J:72057594037928447"},
+    {"id": "wide-high-rotate", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [1, 1, 1], "expected": "J:144115188075856129"},
+    {"id": "wide-high-rotate-handler", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [1, 0, 1], "expected": "J:144115188075856383"},
+    {"id": "wide-high-result-word", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [32, 1, 1], "expected": "J:16777473"},
+    {"id": "wide-high-input-word", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 1, 4294967296], "expected": "J:16777473"},
+    {"id": "wide-high-input-reference", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [-1, 0, 4294967296], "expected": "J:549755813888"},
+    {"id": "wide-high-negative", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 1, -1], "expected": "J:256"},
+    {"id": "wide-high-negative-handler", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 0, -1], "expected": "J:510"},
+    {"id": "wide-high-minimum", "method": "wideHighClobber", "parameters": ["I", "I", "J"], "arguments": [0, 1, -9223372036854775808], "expected": "J:385"}
   ]
 }

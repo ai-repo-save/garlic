@@ -104,4 +104,19 @@ public final class ControlFlowOracle {
         }
         return sum;
     }
+
+    public static long wideHighClobber(int selector, int divisor, long value) {
+        int marker = 0;
+        Object previous = "high-word";
+        if (previous == null || selector >= 0) {
+            marker = 257;
+            try {
+                int quotient = selector / divisor;
+            } catch (ArithmeticException exception) {
+                marker = 511;
+            }
+        }
+        long rotated = Long.rotateLeft(value, selector);
+        return Long.reverseBytes(rotated) + marker;
+    }
 }
