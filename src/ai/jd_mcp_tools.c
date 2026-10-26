@@ -783,10 +783,16 @@ static string tool_jimple(jd_mcp_server *server, const char *path,
     char *raw = NULL;
     int rc = exec_process(argv, NULL, true, &raw);
     if (rc != 0 || !raw || raw[0] == '\0') {
-        free(raw);
+        char *result;
         if (rc == 1)
-            return str_create_in(pool, "Error: class not found: %s", class_name);
-        return str_create_in(pool, "Error: jimple failed (exit=%d)", rc);
+            result = str_create_in(pool, "Error: class not found: %s", class_name);
+        else
+            result = str_create_in(pool,
+                "Error: jimple failed (exit=%d; path=%s; class=%s)\n"
+                "Captured CLI output (may contain incomplete Jimple):\n%s",
+                rc, path, class_name, raw ? raw : "(no output)");
+        free(raw);
+        return result;
     }
     char *result = str_create_in(pool, "%s", raw);
     free(raw);

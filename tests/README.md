@@ -99,3 +99,28 @@ ctest --test-dir build -R '^dex_mutf8_integration$' --output-on-failure
 
 The option defaults to OFF and uses only Python's standard library and the built
 CLI. Generated DEX files remain temporary; no APK, JDK, SDK, or network is needed.
+
+## Jimple arithmetic execution
+
+`e2e/jimple_arithmetic.py` hand-encodes DEX arithmetic instructions using Android's
+[opcode table](https://source.android.com/docs/core/runtime/dalvik-bytecode) and
+[instruction formats](https://source.android.com/docs/core/runtime/instruction-formats).
+It reads the same class through MCP from an APK and a DEX descriptor, then uses
+Soot 4.6.0 to produce a JVM class. A JDK executes 90 methods against independent
+numeric results: 23x/2addr arithmetic, 12x unary/conversions, and comparisons with
+overlapping source/destination registers. The same run checks missing-class and
+reserved-opcode errors, including the failing method and instruction offset.
+This explicit e2e is outside the default test set.
+
+Run on the build environment with JDK 21, `uv`, and the built Garlic:
+
+```sh
+mkdir -p build/validation-tools
+curl -fL https://repo.maven.apache.org/maven2/org/soot-oss/soot/4.6.0/soot-4.6.0-jar-with-dependencies.jar \
+  -o build/validation-tools/soot-4.6.0-jar-with-dependencies.jar
+uv run tests/e2e/jimple_arithmetic.py --garlic build/garlic \
+  --soot-jar build/validation-tools/soot-4.6.0-jar-with-dependencies.jar
+```
+
+Soot and the JDK are test dependencies. This test does not establish correctness
+of control-flow type merges or ambiguous DEX constant types in other methods.

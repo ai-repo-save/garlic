@@ -16,7 +16,7 @@
 
 #define JD_MCP_PROTOCOL_VERSION         "2024-11-05"
 #define JD_MCP_SERVER_NAME              "garlic-mcp"
-#define JD_MCP_SERVER_VERSION           "1.0.0"
+#define JD_MCP_SERVER_VERSION           "1.0.1"
 
 #define JD_MCP_MAX_LINE_SIZE            (1024U * 1024U)   // 1mb message
 #ifdef _WIN32

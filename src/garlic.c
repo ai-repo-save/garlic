@@ -144,6 +144,7 @@ static void opt_usage(const char *progname) {
     fprintf(stderr, "    -g: generate call graph for dex/apk\n");
     fprintf(stderr, "    -s: apk/dex to smali\n");
     fprintf(stderr, "    --jimple: apk/dex to Jimple\n");
+    fprintf(stderr, "    --version: print version\n");
     fprintf(stderr, "    -c: with -s or --jimple, write one class to stdout (or -o file)\n");
     fprintf(stderr, "    -n: analyze native libs\n");
     fprintf(stderr, "    -m: start MCP server (stdio protocol)\n");
@@ -400,6 +401,11 @@ extern const int         MCP_TOOL_COUNT;
 
 int main(int argc, char **argv)
 {
+    if (argc == 2 && strcmp(argv[1], "--version") == 0) {
+        printf("garlic %s\n", JD_MCP_SERVER_VERSION);
+        return 0;
+    }
+
     /* -l <email> <key>: install license file for librosemarylib */
     if (argc >= 2 && strcmp(argv[1], "-l") == 0) {
         if (argc < 4) {

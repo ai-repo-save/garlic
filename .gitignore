@@ -9,4 +9,5 @@ doc/
 cmake-build-release/
 /*.java
 !tests/e2e/dex_smali_lookup_lifetime.py
+!tests/e2e/jimple_arithmetic.py
 !docs/bug-reports/apk-smali-lookup-memory.md
