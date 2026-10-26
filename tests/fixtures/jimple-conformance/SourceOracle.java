@@ -117,4 +117,56 @@ public final class SourceOracle {
     public static int registerMoves() { return -123; }
     public static long registerWide() { return -32768L; }
     public static String registerObject() { return "registers"; }
+    private static final int[][] INT_PAIRS = {{0, 0}, {-7, -7}, {4, 4}, {-3, 0}, {0, 5}, {9, -2}, {-8, -1}, {1, 2}};
+    private static final int[] ZERO_VALUES = {-7, 0, 4, -1, 1};
+    private static int intBits(int kind) {
+        int acc = 0;
+        for (int i = 0; i < INT_PAIRS.length; i++) {
+            int a = INT_PAIRS[i][0], b = INT_PAIRS[i][1];
+            boolean taken = switch (kind) {
+                case 0 -> a == b;
+                case 1 -> a != b;
+                case 2 -> a < b;
+                case 3 -> a > b;
+                case 4 -> a <= b;
+                default -> throw new AssertionError(kind);
+            };
+            if (taken) acc |= 1 << i;
+        }
+        return acc;
+    }
+    private static int zeroBits(boolean greater) {
+        int acc = 0;
+        for (int i = 0; i < ZERO_VALUES.length; i++)
+            if (greater ? ZERO_VALUES[i] > 0 : ZERO_VALUES[i] >= 0) acc |= 1 << i;
+        return acc;
+    }
+    public static int ifEq() { return intBits(0); }
+    public static int ifNe() { return intBits(1); }
+    public static int ifLt() { return intBits(2); }
+    public static int ifGt() { return intBits(3); }
+    public static int ifLe() { return intBits(4); }
+    public static int ifGez() { return zeroBits(false); }
+    public static int ifGtz() { return zeroBits(true); }
+    private static int refBits(boolean equal) {
+        String left = "left";
+        Object same = new Object();
+        boolean[] taken = {left == left, "left" == "right", null == null, null == left, "same" == "same", new Object() == new Object(), same == same};
+        int acc = 0;
+        for (int i = 0; i < taken.length; i++) if (taken[i] == equal) acc |= 1 << i;
+        return acc;
+    }
+    public static int refEq() { return refBits(true); }
+    public static int refNe() { return refBits(false); }
+    public static long high16Zero() { return 0L; }
+    public static long high16Neg() { return Long.MIN_VALUE; }
+    public static long high16NegOne() { return -1L << 48; }
+    public static long high16Pos() { return 1L << 48; }
+    public static long high16PosMax() { return 0x7fffL << 48; }
+    public static boolean[] dataBoolean() { return new boolean[]{false, true}; }
+    public static char[] dataChar() { return new char[]{0, '\uffee'}; }
+    public static float[] dataFloat() { return new float[]{-0.0f, Float.intBitsToFloat(0x3fc00000)}; }
+    public static double[] dataDouble() { return new double[]{-0.0d, 2.5d}; }
+    public static int parseInt() { return Integer.parseInt("41"); }
+    public static int invokeAdd() { return 20 + 21; }
 }

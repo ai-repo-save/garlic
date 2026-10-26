@@ -372,6 +372,194 @@ public final class BuildCorpus {
         add("filledArray", "[I", b);
         finish();
     }
+    static final int[][] INT_PAIRS = {{0, 0}, {-7, -7}, {4, 4}, {-3, 0}, {0, 5}, {9, -2}, {-8, -1}, {1, 2}};
+    static final int[] ZERO_VALUES = {-7, 0, 4, -1, 1};
+
+    static void takeBit(MethodImplementationBuilder b, int index) {
+        b.addInstruction(new BuilderInstruction10t(Opcode.GOTO, b.getLabel("next" + index)));
+        b.addLabel("taken" + index);
+        b.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 3, 1 << index));
+        b.addInstruction(new BuilderInstruction23x(Opcode.OR_INT, 2, 2, 3));
+        b.addLabel("next" + index);
+    }
+    static void intCompare(String name, Opcode op) {
+        var b = new MethodImplementationBuilder(4);
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 2, 0));
+        for (int i = 0; i < INT_PAIRS.length; i++) {
+            FixtureSupport.constant(b, "I", 0, INT_PAIRS[i][0]);
+            FixtureSupport.constant(b, "I", 1, INT_PAIRS[i][1]);
+            b.addInstruction(new BuilderInstruction22t(op, 0, 1, b.getLabel("taken" + i)));
+            takeBit(b, i);
+        }
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 2));
+        add(name, "I", b);
+    }
+    static void zeroCompare(String name, Opcode op) {
+        var b = new MethodImplementationBuilder(4);
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 2, 0));
+        for (int i = 0; i < ZERO_VALUES.length; i++) {
+            FixtureSupport.constant(b, "I", 0, ZERO_VALUES[i]);
+            b.addInstruction(new BuilderInstruction21t(op, 0, b.getLabel("taken" + i)));
+            takeBit(b, i);
+        }
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 2));
+        add(name, "I", b);
+    }
+    static void refCase(MethodImplementationBuilder b, int index, Opcode op) {
+        b.addInstruction(new BuilderInstruction22t(op, 0, 1, b.getLabel("taken" + index)));
+        takeBit(b, index);
+    }
+    static void refCompare(String name, Opcode op) {
+        var b = new MethodImplementationBuilder(4);
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 2, 0));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 0, new ImmutableStringReference("left")));
+        b.addInstruction(new BuilderInstruction12x(Opcode.MOVE_OBJECT, 1, 0));
+        refCase(b, 0, op);
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 0, new ImmutableStringReference("left")));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 1, new ImmutableStringReference("right")));
+        refCase(b, 1, op);
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 0, 0));
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 1, 0));
+        refCase(b, 2, op);
+        b.addInstruction(new BuilderInstruction21c(Opcode.SGET_OBJECT, 0, new ImmutableFieldReference("LRefIf;", "absent", "Ljava/lang/Object;")));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 1, new ImmutableStringReference("left")));
+        refCase(b, 3, op);
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 0, new ImmutableStringReference("same")));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 1, new ImmutableStringReference("same")));
+        refCase(b, 4, op);
+        b.addInstruction(new BuilderInstruction21c(Opcode.NEW_INSTANCE, 0, new ImmutableTypeReference("Ljava/lang/Object;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_DIRECT, FixtureSupport.ref("java/lang/Object", "<init>", "V"), 0);
+        b.addInstruction(new BuilderInstruction21c(Opcode.NEW_INSTANCE, 1, new ImmutableTypeReference("Ljava/lang/Object;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_DIRECT, FixtureSupport.ref("java/lang/Object", "<init>", "V"), 1);
+        refCase(b, 5, op);
+        b.addInstruction(new BuilderInstruction21c(Opcode.NEW_INSTANCE, 0, new ImmutableTypeReference("Ljava/lang/Object;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_DIRECT, FixtureSupport.ref("java/lang/Object", "<init>", "V"), 0);
+        b.addInstruction(new BuilderInstruction12x(Opcode.MOVE_OBJECT, 1, 0));
+        refCase(b, 6, op);
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 2));
+        add(name, "I", b);
+    }
+    static void comparisons() throws Exception {
+        begin("IntIf");
+        intCompare("ifEq", Opcode.IF_EQ);
+        intCompare("ifNe", Opcode.IF_NE);
+        intCompare("ifLt", Opcode.IF_LT);
+        intCompare("ifGt", Opcode.IF_GT);
+        intCompare("ifLe", Opcode.IF_LE);
+        zeroCompare("ifGez", Opcode.IF_GEZ);
+        zeroCompare("ifGtz", Opcode.IF_GTZ);
+        finish();
+        begin("RefIf");
+        refCompare("refEq", Opcode.IF_EQ);
+        refCompare("refNe", Opcode.IF_NE);
+        save(List.of(FixtureSupport.cls(owner, 1, "Ljava/lang/Object;", List.of(), List.of(
+            new ImmutableField("LRefIf;", "absent", "Ljava/lang/Object;", 9, null, Set.of(), Set.of())), methods)));
+    }
+    static void high16() throws Exception {
+        begin("High16");
+        literal("high16Zero", "J", new BuilderInstruction21lh(Opcode.CONST_WIDE_HIGH16, 0, 0L));
+        literal("high16Neg", "J", new BuilderInstruction21lh(Opcode.CONST_WIDE_HIGH16, 0, Long.MIN_VALUE));
+        literal("high16NegOne", "J", new BuilderInstruction21lh(Opcode.CONST_WIDE_HIGH16, 0, -1L << 48));
+        literal("high16Pos", "J", new BuilderInstruction21lh(Opcode.CONST_WIDE_HIGH16, 0, 1L << 48));
+        literal("high16PosMax", "J", new BuilderInstruction21lh(Opcode.CONST_WIDE_HIGH16, 0, 0x7fffL << 48));
+        finish();
+    }
+    static void typedPayload(String name, String type, int width, Number... values) {
+        var b = new MethodImplementationBuilder(2);
+        b.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 0, values.length));
+        b.addInstruction(new BuilderInstruction22c(Opcode.NEW_ARRAY, 1, 0, new ImmutableTypeReference(type)));
+        b.addInstruction(new BuilderInstruction31t(Opcode.FILL_ARRAY_DATA, 1, b.getLabel("data")));
+        b.addInstruction(new BuilderInstruction10t(Opcode.GOTO, b.getLabel("done")));
+        b.addLabel("data");
+        b.addInstruction(new BuilderArrayPayload(width, List.of(values)));
+        b.addLabel("done");
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN_OBJECT, 1));
+        add(name, type, b);
+    }
+    static void typedArrayData() throws Exception {
+        begin("TypedArrayData");
+        typedPayload("dataBoolean", "[Z", 1, 0, 1);
+        // dexlib2 stores width 2 as a signed short; U+FFEE is the same 16 bits as -18.
+        typedPayload("dataChar", "[C", 2, 0, (short) 0xffee);
+        typedPayload("dataFloat", "[F", 4, 0x80000000, 0x3fc00000);
+        typedPayload("dataDouble", "[D", 8, Long.MIN_VALUE, 0x4004000000000000L);
+        finish();
+    }
+    static void polymorphic(boolean range) throws Exception {
+        begin(range ? "PolymorphicRange" : "PolymorphicList");
+        var b = new MethodImplementationBuilder(6);
+        FixtureSupport.invoke(b, Opcode.INVOKE_STATIC, FixtureSupport.ref("java/lang/invoke/MethodHandles", "lookup", "Ljava/lang/invoke/MethodHandles$Lookup;"));
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_OBJECT, 0));
+        b.addInstruction(new BuilderInstruction21c(Opcode.SGET_OBJECT, 1, new ImmutableFieldReference("Ljava/lang/Integer;", "TYPE", "Ljava/lang/Class;")));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_CLASS, 2, new ImmutableTypeReference("Ljava/lang/String;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_STATIC, FixtureSupport.ref("java/lang/invoke/MethodType", "methodType", "Ljava/lang/invoke/MethodType;", "Ljava/lang/Class;", "Ljava/lang/Class;"), 1, 2);
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_OBJECT, 1));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_CLASS, 2, new ImmutableTypeReference("Ljava/lang/Integer;")));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 3, new ImmutableStringReference("parseInt")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_VIRTUAL, FixtureSupport.ref("java/lang/invoke/MethodHandles$Lookup", "findStatic", "Ljava/lang/invoke/MethodHandle;", "Ljava/lang/Class;", "Ljava/lang/String;", "Ljava/lang/invoke/MethodType;"), 0, 2, 3, 1);
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_OBJECT, 0));
+        b.addInstruction(new BuilderInstruction21c(Opcode.CONST_STRING, 1, new ImmutableStringReference("41")));
+        var method = FixtureSupport.ref("java/lang/invoke/MethodHandle", "invoke", "Ljava/lang/Object;", "[Ljava/lang/Object;");
+        var proto = new ImmutableMethodProtoReference(List.of("Ljava/lang/String;"), "I");
+        if (range) b.addInstruction(new BuilderInstruction4rcc(Opcode.INVOKE_POLYMORPHIC_RANGE, 0, 2, method, proto));
+        else b.addInstruction(new BuilderInstruction45cc(Opcode.INVOKE_POLYMORPHIC, 2, 0, 1, 0, 0, 0, method, proto));
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT, 2));
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 2));
+        add("parseInt", "I", b);
+        // Bundled dexlib2 interns method protos only through method_ids, not 45cc/4rcc reference2.
+        var prototype = new MethodImplementationBuilder(2);
+        prototype.addInstruction(new BuilderInstruction11n(Opcode.CONST_4, 1, 0));
+        prototype.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 1));
+        methods.add(FixtureSupport.method(owner, "prototype", "I", List.of("Ljava/lang/String;"), 9, prototype));
+        finish();
+    }
+    static MethodImplementationBuilder bootstrap() {
+        var b = new MethodImplementationBuilder(5);
+        b.addLabel("start");
+        b.addInstruction(new BuilderInstruction21c(Opcode.NEW_INSTANCE, 0, new ImmutableTypeReference("Ljava/lang/invoke/ConstantCallSite;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_VIRTUAL, FixtureSupport.ref("java/lang/invoke/MethodHandles$Lookup", "lookupClass", "Ljava/lang/Class;"), 2);
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_OBJECT, 1));
+        FixtureSupport.invoke(b, Opcode.INVOKE_VIRTUAL, FixtureSupport.ref("java/lang/invoke/MethodHandles$Lookup", "findStatic", "Ljava/lang/invoke/MethodHandle;", "Ljava/lang/Class;", "Ljava/lang/String;", "Ljava/lang/invoke/MethodType;"), 2, 1, 3, 4);
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT_OBJECT, 1));
+        FixtureSupport.invoke(b, Opcode.INVOKE_DIRECT, FixtureSupport.ref("java/lang/invoke/ConstantCallSite", "<init>", "V", "Ljava/lang/invoke/MethodHandle;"), 0, 1);
+        b.addLabel("end");
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN_OBJECT, 0));
+        b.addLabel("handler");
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_EXCEPTION, 0));
+        b.addInstruction(new BuilderInstruction21c(Opcode.NEW_INSTANCE, 1, new ImmutableTypeReference("Ljava/lang/RuntimeException;")));
+        FixtureSupport.invoke(b, Opcode.INVOKE_DIRECT, FixtureSupport.ref("java/lang/RuntimeException", "<init>", "V", "Ljava/lang/Throwable;"), 1, 0);
+        b.addInstruction(new BuilderInstruction11x(Opcode.THROW, 1));
+        b.addCatch("Ljava/lang/NoSuchMethodException;", b.getLabel("start"), b.getLabel("end"), b.getLabel("handler"));
+        b.addCatch("Ljava/lang/IllegalAccessException;", b.getLabel("start"), b.getLabel("end"), b.getLabel("handler"));
+        return b;
+    }
+    static void custom(boolean range) throws Exception {
+        begin(range ? "CustomRange" : "CustomList");
+        var site = new ImmutableCallSiteReference("call_site_0",
+            new ImmutableMethodHandleReference(MethodHandleType.INVOKE_STATIC, FixtureSupport.ref(owner, "link", "Ljava/lang/invoke/CallSite;", "Ljava/lang/invoke/MethodHandles$Lookup;", "Ljava/lang/String;", "Ljava/lang/invoke/MethodType;")),
+            "add", new ImmutableMethodProtoReference(List.of("I", "I"), "I"), List.<org.jf.dexlib2.immutable.value.ImmutableEncodedValue>of());
+        var b = new MethodImplementationBuilder(3);
+        b.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 0, 20));
+        b.addInstruction(new BuilderInstruction21s(Opcode.CONST_16, 1, 21));
+        if (range) b.addInstruction(new BuilderInstruction3rc(Opcode.INVOKE_CUSTOM_RANGE, 0, 2, site));
+        else FixtureSupport.invoke(b, Opcode.INVOKE_CUSTOM, site, 0, 1);
+        b.addInstruction(new BuilderInstruction11x(Opcode.MOVE_RESULT, 2));
+        b.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 2));
+        add("invokeAdd", "I", b);
+        var add = new MethodImplementationBuilder(2);
+        add.addInstruction(new BuilderInstruction23x(Opcode.ADD_INT, 0, 0, 1));
+        add.addInstruction(new BuilderInstruction11x(Opcode.RETURN, 0));
+        methods.add(FixtureSupport.method(owner, "add", "I", List.of("I", "I"), 9, add));
+        methods.add(FixtureSupport.method(owner, "link", "Ljava/lang/invoke/CallSite;", List.of("Ljava/lang/invoke/MethodHandles$Lookup;", "Ljava/lang/String;", "Ljava/lang/invoke/MethodType;"), 9, bootstrap()));
+        finish();
+    }
+    static void modern() throws Exception {
+        polymorphic(false);
+        polymorphic(true);
+        custom(false);
+        custom(true);
+    }
+
     static MethodImplementationBuilder calculation(boolean isStatic) {
         var b = new MethodImplementationBuilder(isStatic ? 6 : 7);
         b.addInstruction(new BuilderInstruction12x(Opcode.DOUBLE_TO_LONG, 0, isStatic ? 4 : 5));
@@ -413,6 +601,10 @@ public final class BuildCorpus {
     public static void main(String[] args) throws Exception {
         output = Path.of(args[0]); Files.createDirectories(output);
         literals();
+        comparisons();
+        high16();
+        typedArrayData();
+        modern();
         for (boolean sparse : new boolean[]{false, true}) {
             switches(sparse, false, false); switches(sparse, false, true); switches(sparse, true, true);
         }

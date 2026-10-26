@@ -45,8 +45,14 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 | CallResults | 零参数 void、object 和 int 返回；move-result 家族；外部反射确认 void 调用写入 |
 | Objects / Structure | monitor、check-cast、instance-of、implements、abstract、native 无体、clinit 的实际初始化效果 |
 | Registers | move 家族、v15/v300、宽值和引用、高寄存器、goto 三种编码 |
+| IntIf | if-eq、if-ne、if-lt、if-gt、if-le；同一组含零、负数、正数、相等和不等整数对，返回值是按对序的位图 |
+| RefIf | 引用 if-eq、if-ne；同一引用、不同字符串、两个零寄存器、静态 null 字段与字符串、相同字符串常量、两个新对象、对象与自身 |
+| High16 | const-wide/high16 的 0、Long.MIN_VALUE、-1<<48、1<<48、0x7fff<<48；与 LongLiterals 中的同指令分开，避免被其他 long 编码失败掩盖 |
+| TypedArrayData | 中部 fill-array-data：boolean 0/1、char 0 与 U+FFEE、float -0 与 1.5、double -0 与 2.5 |
+| CustomList / CustomRange | invoke-custom 与 invoke-custom/range。bootstrap 按 jadx `TestRawCustomInvoke` 调用 `Lookup.findStatic` 并返回 `ConstantCallSite`，目标是同组 `add(II)I` |
+| PolymorphicList / PolymorphicRange | invoke-polymorphic 与 invoke-polymorphic/range。方法引用形状按 jadx `TestPolymorphicInvoke.smali`：`MethodHandle.invoke(Object[])Object` 加调用 proto `(Ljava/lang/String;)I` |
 
-`const-string/jumbo` 验证 31c 编码，不宣称覆盖大于 65535 的真实字符串索引。寄存器样本不宣称覆盖 v65535。共享 switch payload、DEX 041 容器和动态调用的语义仍由库存明确显示缺口。
+`const-string/jumbo` 验证 31c 编码，不宣称覆盖大于 65535 的真实字符串索引。寄存器样本不宣称覆盖 v65535。共享 switch payload 和 DEX 041 容器仍由库存明确显示缺口。
 
 ## 库存
 
@@ -60,6 +66,16 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 样本存在与执行通过分别记录。helper 方法即使实际被间接调用，也只按结构验证计数，避免把静态可见指令误认为逐路径执行证明。格式通过表示该格式至少一个样本通过，不表示同格式全部 opcode 通过。
 
 `coverage_union` 对新语料、既有算术语料和 control-flow 实际源 DEX 做去重并集。`external_evidence` 单独保存既有通过报告或日志、源 DEX 的 SHA-256 及生成器身份。既有算术 runner 使用临时 DEX，新工具通过其现有 `cases()` 和 `dex_fixture()` 重建同输入，只扫描，不声称本轮重新执行。control-flow 使用通过报告中 `build-fixture` 命令实际产出的 DEX，读取该运行的 `tool/identity.json`。算术日志与对应构建身份必须同时提供。外部候选与本轮候选分开记录；并集不等于最新候选的全部回归验证。
+
+## 第三方能力边界
+
+这些边界来自测试依赖的实际异常或写入拒绝，不作为 Garlic 绿样或红样。
+
+- `const-class I`：DEX 允许基本类型描述符。原 DEX 的 Dexpler/JVM 抛出 `NoClassDefFoundError: I`，原因是 `ClassNotFoundException: I`。
+- `const-method-handle`、`const-method-type`：Soot 4.6.0 自带的 `org.jf.dexlib2.writer.pool.ClassPool.internCode` 对指令引用类型 4（`METHOD_PROTO`）和 6（`METHOD_HANDLE`）抛出 `Unrecognized reference type`。同一 Soot 的 `InstructionFactory` 没有这两个 opcode，默认分支抛出 `IllegalArgumentException`。测试不手写 DEX 字节，也不把缺口改成通过。
+- `invoke-polymorphic`、`invoke-polymorphic/range`：dexlib2 能写出合法指令，但只在同 DEX 已有相同 `method_id` proto 时才能解析 45cc/4rcc 的第二个引用。Dexpler 把它降成 `MethodHandle.invoke(Object[])`，写 class 时在 `BPrimitiveCastInst` 抛出 `invalid fromType java.lang.Object`。run08 源验证失败后不运行 Garlic。
+
+`invoke-custom` 与 `invoke-custom/range` 已通过 Java oracle 和原 DEX 的 Dexpler/JVM 数值比较，不属于上述边界。
 
 ## 规范负例
 
