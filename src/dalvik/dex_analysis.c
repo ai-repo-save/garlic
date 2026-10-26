@@ -3,6 +3,7 @@
 #include "dalvik/dex_decompile.h"
 #include "dalvik/dex_ins.h"
 #include "dalvik/dex_method.h"
+#include "parser/dex/metadata.h"
 
 static bool instruction_can_throw(u1 op)
 {
@@ -73,6 +74,9 @@ dex_analysis *dex_analyze_method(jd_meta_dex *meta, encoded_method *encoded)
         jd_ins *ins = lget_obj(method->instructions, i);
         analysis->offsets[ins->offset] = i;
         flow[i].instruction = ins;
+        flow[i].clobbers = bitset_copy(ins->defs);
+        if (dex_opcode_result_width(ins->code) == 2)
+            bitset_set(flow[i].clobbers, bitset_minimum(ins->defs) + 1);
         flow[i].handlers = linit_object();
         if (!instruction_can_throw(ins->code))
             continue;

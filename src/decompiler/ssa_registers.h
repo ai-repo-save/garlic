@@ -5,6 +5,7 @@
 
 typedef struct {
     jd_ins *instruction;
+    bitset_t *clobbers;
     list_object *handlers;
 } jd_register_flow;
 

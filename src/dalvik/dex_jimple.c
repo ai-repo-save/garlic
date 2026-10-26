@@ -201,10 +201,22 @@ static char *value_type(jimple_body *body, int value, unsigned kind)
     }
 }
 
+static void value_failure(jimple_body *body, const char *reason, int reg,
+                          int value, unsigned kind)
+{
+    if (!body->failed)
+        fprintf(stderr, "timestamp=%lld level=ERROR event=jimple_value_invalid "
+                        "reason=%s at=%d op=%u reg=%d value=%d kind=%u method=%s\n",
+                (long long)time(NULL), reason, body->unit,
+                body->unit < 0 ? 0 : body->code->insns[body->unit] & 0xFF,
+                reg, value, kind, body->signature);
+    body->failed = 1;
+}
+
 static char *value_local(jimple_body *body, int reg, int value, unsigned kind)
 {
     if (value < 0 || kind == 0) {
-        body->failed = 1;
+        value_failure(body, "missing_typed_value", reg, value, kind);
         return "bad";
     }
     char *type = value_type(body, value, kind);
@@ -225,7 +237,7 @@ static char *def_reg(jimple_body *body, int reg, char *type)
 {
     int value = dex_analysis_output(body->analysis, body->unit, reg);
     if (value < 0) {
-        body->failed = 1;
+        value_failure(body, "missing_definition", reg, value, 0);
         return "bad";
     }
     unsigned kinds = body->analysis->types[value].kinds;
@@ -240,7 +252,7 @@ static char *def_reg(jimple_body *body, int reg, char *type)
 static char *use_reg(jimple_body *body, int reg)
 {
     if (reg < 0 || reg >= body->nregs || body->regs[reg].name == NULL) {
-        body->failed = 1;
+        value_failure(body, "undefined_register", reg, -1, 0);
         return "bad";
     }
     return body->regs[reg].name;
@@ -522,7 +534,7 @@ static void emit_constant(jimple_body *body, int reg, u8 bits)
         char *literal;
         if (kind == DEX_VALUE_REFERENCE) {
             if (bits != 0) {
-                body->failed = 1;
+                value_failure(body, "nonzero_reference_literal", reg, value, kinds);
                 return;
             }
             literal = "null";

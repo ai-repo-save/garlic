@@ -101,7 +101,7 @@ jd_register_ssa *sform_register_analyze(jd_register_flow *flow, int count,
             bitset_clear(output);
             bitset_inplace_union(output, ssa->inputs[i]);
             for (size_t d = 0; bitset_next_set_bit(output, &d); d++) {
-                if (bitset_get(ins->defs, ssa->definitions[d].reg))
+                if (bitset_get(flow[i].clobbers, ssa->definitions[d].reg))
                     bitset_set_to_value(output, d, false);
             }
             for (size_t r = 0; bitset_next_set_bit(ins->defs, &r); r++)

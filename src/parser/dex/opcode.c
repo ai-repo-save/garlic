@@ -1,5 +1,34 @@
 #include "dex_ins_helper.h"
 
+int dex_opcode_result_width(u1 code)
+{
+    if ((code >= DEX_INS_MOVE_WIDE && code <= DEX_INS_MOVE_WIDE_16) ||
+        (code >= DEX_INS_CONST_WIDE_16 && code <= DEX_INS_CONST_WIDE_HIGH16) ||
+        (code >= DEX_INS_ADD_LONG && code <= DEX_INS_USHR_LONG) ||
+        (code >= DEX_INS_ADD_DOUBLE && code <= DEX_INS_REM_DOUBLE) ||
+        (code >= DEX_INS_ADD_LONG_2ADDR && code <= DEX_INS_USHR_LONG_2ADDR) ||
+        (code >= DEX_INS_ADD_DOUBLE_2ADDR && code <= DEX_INS_REM_DOUBLE_2ADDR))
+        return 2;
+    switch (code) {
+        case DEX_INS_MOVE_RESULT_WIDE:
+        case DEX_INS_AGET_WIDE:
+        case DEX_INS_IGET_WIDE:
+        case DEX_INS_SGET_WIDE:
+        case DEX_INS_NEG_LONG:
+        case DEX_INS_NOT_LONG:
+        case DEX_INS_NEG_DOUBLE:
+        case DEX_INS_INT_TO_LONG:
+        case DEX_INS_INT_TO_DOUBLE:
+        case DEX_INS_LONG_TO_DOUBLE:
+        case DEX_INS_FLOAT_TO_LONG:
+        case DEX_INS_FLOAT_TO_DOUBLE:
+        case DEX_INS_DOUBLE_TO_LONG:
+            return 2;
+        default:
+            return 1;
+    }
+}
+
 extern string dex_opcode_name(u1 code)
 {
     switch(code) {
