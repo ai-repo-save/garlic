@@ -37,6 +37,7 @@ typedef struct {
     unsigned char *labels;
     int end_label;
     char *pending_invoke;
+    char *pending_value;
     char *pending_type;
     int failed;
 } jimple_body;
@@ -566,6 +567,30 @@ static void emit_invoke(jimple_body *body, u1 op, char *sig, char *args, char *r
 static int reg_a_12(u2 unit) { return (unit >> 8) & 0x0F; }
 static int reg_b_12(u2 unit) { return (unit >> 12) & 0x0F; }
 
+static void emit_filled_array(jimple_body *body, int i)
+{
+    dex_code_item *code = body->code;
+    u2 unit = code->insns[i];
+    bool range = (unit & 0xFF) == DEX_INS_FILLED_NEW_ARRAY_RANGE;
+    int count = range ? unit >> 8 : unit >> 12;
+    const char *desc = dex_str_of_type_id(body->dex, code->insns[i + 1]);
+    if (desc[0] != '[' || desc[1] == 'J' || desc[1] == 'D' || (!range && count > 5)) {
+        value_failure(body, "invalid_filled_array_type_or_count", -1, -1, (unsigned)count);
+        return;
+    }
+    char *array = pool_printf("filled_%d", i);
+    char *type = jimple_type(desc);
+    remember_local(body, array, type);
+    emit_stmt(body, pool_printf("%s = newarray (%s)[%d]", array, jimple_type(desc + 1), count));
+    for (int n = 0; n < count; n++) {
+        int reg = range ? code->insns[i + 2] + n :
+                  n == 4 ? (unit >> 8) & 15 : (code->insns[i + 2] >> (n * 4)) & 15;
+        emit_stmt(body, pool_printf("%s[%d] = %s", array, n, use_reg(body, reg)));
+    }
+    body->pending_value = array;
+    body->pending_type = type;
+}
+
 static void emit_one(jimple_body *body, int i)
 {
     jd_meta_dex *dex = body->dex;
@@ -577,19 +602,25 @@ static void emit_one(jimple_body *body, int i)
     char *dest;
     char *stmt;
 
+    bool move_result = op == DEX_INS_MOVE_RESULT || op == DEX_INS_MOVE_RESULT_WIDE ||
+                       op == DEX_INS_MOVE_RESULT_OBJECT;
+    if (!move_result)
+        body->pending_value = NULL;
     if (body->labels[i]) {
         flush_invoke(body);
         add_line(body, pool_printf("label_%d:", i));
     }
 
-    if (op == DEX_INS_MOVE_RESULT || op == DEX_INS_MOVE_RESULT_WIDE ||
-        op == DEX_INS_MOVE_RESULT_OBJECT) {
+    if (move_result) {
+        char *value = body->pending_value != NULL ? body->pending_value : body->pending_invoke;
         dest = def_reg(body, unit >> 8, body->pending_type != NULL ? body->pending_type : "int");
-        if (body->pending_invoke != NULL) {
-            add_line(body, pool_printf("%s = %s;", dest, body->pending_invoke));
-            body->pending_invoke = NULL;
-            body->pending_type = NULL;
-        }
+        if (value != NULL)
+            add_line(body, pool_printf("%s = %s;", dest, value));
+        else
+            value_failure(body, "missing_result", unit >> 8, -1, 0);
+        body->pending_invoke = NULL;
+        body->pending_value = NULL;
+        body->pending_type = NULL;
         return;
     }
 
@@ -1109,6 +1140,10 @@ static void emit_one(jimple_body *body, int i)
             break;
         case DEX_INS_FILL_ARRAY_DATA:
             emit_fill_array(body, i);
+            break;
+        case DEX_INS_FILLED_NEW_ARRAY:
+        case DEX_INS_FILLED_NEW_ARRAY_RANGE:
+            emit_filled_array(body, i);
             break;
         case DEX_INS_INVOKE_POLYMORPHIC:
         case DEX_INS_INVOKE_POLYMORPHIC_RANGE:
