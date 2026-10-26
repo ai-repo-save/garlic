@@ -27,11 +27,11 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 
 原 DEX 的 Dexpler/JVM 结果与 Java oracle 不一致时，该组属于源验证或 oracle 能力问题。原始 stdout、stderr 和异常堆栈保留在运行目录。MCP 输出按 UTF-8 严格读取；非法 UTF-8 原始字节仍保留在 stdout 文件中。
 
-下列 Soot 4.6.0 与其自带 dexlib2 的异常属于源验证或 oracle 能力问题。
+Soot 4.6.0 与其自带 dexlib2 产生下列异常。
 
 - `const-class` 的基本类型描述符 `I`：DEX 允许该描述符。原 DEX 的 Dexpler/JVM 抛出 `NoClassDefFoundError: I`，原因是 `ClassNotFoundException: I`。
 - `const-method-handle`、`const-method-type`：`org.jf.dexlib2.writer.pool.ClassPool.internCode` 对指令引用类型 4（`METHOD_PROTO`）和 6（`METHOD_HANDLE`）抛出 `Unrecognized reference type`。同一 Soot 的 `InstructionFactory` 没有这两个 opcode，默认分支抛出 `IllegalArgumentException`。
-- `invoke-polymorphic`、`invoke-polymorphic/range`：dexlib2 写出合法指令。45cc/4rcc 的第二个引用在同 DEX 已有相同 `method_id` proto 时解析。Dexpler 将指令降为 `MethodHandle.invoke(Object[])`，写 class 时 `BPrimitiveCastInst` 抛出 `invalid fromType java.lang.Object`。
+- `invoke-polymorphic`、`invoke-polymorphic/range`：dexlib2 写出合法指令。dexlib2 在同 DEX 已有相同 `method_id` proto 时，把 45cc/4rcc 的第二个引用解析为该 proto。Dexpler 将指令降为 `MethodHandle.invoke(Object[])`。Soot 写出 class 时，`BPrimitiveCastInst` 抛出 `invalid fromType java.lang.Object`。
 
 ## 分组与边界
 
@@ -55,7 +55,7 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 | RefIf | 引用 if-eq、if-ne；同一引用、不同字符串、两个零寄存器、静态 null 字段与字符串、相同字符串常量、两个新对象、对象与自身 |
 | High16 | const-wide/high16 的 0、Long.MIN_VALUE、-1<<48、1<<48、0x7fff<<48；与 LongLiterals 中的同指令分开 |
 | TypedArrayData | 中部 fill-array-data：boolean 0/1、char 0 与 U+FFEE、float -0 与 1.5、double -0 与 2.5 |
-| CustomList / CustomRange | invoke-custom 与 invoke-custom/range。bootstrap 调用 `Lookup.findStatic` 并返回 `ConstantCallSite`，形状来自 skylot/jadx 提交 `9bdd7b01aa8563c8c9882242125fd277f4b2ed05` 的 `jadx-core/src/test/smali/invoke/TestRawCustomInvoke.smali`。本组目标方法是 `add(II)I` |
+| CustomList / CustomRange | invoke-custom 与 invoke-custom/range。bootstrap 调用 `Lookup.findStatic` 并返回 `ConstantCallSite`，与 skylot/jadx 提交 `9bdd7b01aa8563c8c9882242125fd277f4b2ed05` 的 `jadx-core/src/test/smali/invoke/TestRawCustomInvoke.smali` 相同。本组目标方法是 `add(II)I` |
 | PolymorphicList / PolymorphicRange | invoke-polymorphic 与 invoke-polymorphic/range。方法引用为 `MethodHandle.invoke([Ljava/lang/Object;)Ljava/lang/Object;`，与 skylot/jadx 提交 `9bdd7b01aa8563c8c9882242125fd277f4b2ed05` 的 `jadx-core/src/test/smali/invoke/TestPolymorphicInvoke.smali` 相同。本组调用 proto 是 `(Ljava/lang/String;)I` |
 
 `const-string/jumbo` 样本是 31c 编码的字面量 `jumbo`。寄存器样本的最高寄存器是 v302，宽值占用 v302 与 v303。
@@ -71,7 +71,7 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 
 样本存在与执行通过分别记录。helper 方法即使实际被间接调用，也只按结构验证计数，避免把静态可见指令误认为逐路径执行证明。格式通过表示该格式至少一个样本通过，不表示同格式全部 opcode 通过。
 
-`coverage_union` 对新语料、既有算术语料和 control-flow 实际源 DEX 做去重并集。`external_evidence` 单独保存既有报告或日志、源 DEX 的 SHA-256 及生成器身份。既有算术 runner 使用临时 DEX，新工具通过其现有 `cases()` 和 `dex_fixture()` 重建同输入，只扫描。control-flow 使用所给报告中 `build-fixture` 命令实际产出的 DEX，读取该运行的 `tool/identity.json`。算术日志与对应构建身份必须同时提供。外部候选与本次运行候选分开记录。
+`coverage_union` 对新语料、既有算术语料和 control-flow 实际源 DEX 做去重并集。`external_evidence` 单独保存既有报告或日志、源 DEX 的 SHA-256 及生成器身份。既有算术 runner 使用临时 DEX，新工具通过其现有 `cases()` 和 `dex_fixture()` 重建同输入，只扫描。`--arithmetic-evidence-log` 与 `--arithmetic-build-identity` 必须同时提供。`--cfg-report` 使用所给报告中 `build-fixture` 命令实际产出的 DEX，并读取该运行的 `tool/identity.json`。外部候选与本次运行候选分开记录。
 
 ## 规范负例
 
@@ -82,7 +82,7 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 
 ## 显式运行
 
-构建和 Java 执行在 dev-builder 或任务指定服务器完成。先把候选及构建身份固定到项目内的独立运行目录。`--build-identity` 原样嵌入已有构建记录；记录应包含原路径、Git/dirty 状态、构建类型、编译器和依赖身份。
+构建和 Java 执行在 dev-builder 或任务指定服务器完成。先把候选及构建身份固定到项目内的独立运行目录。`--build-identity` 原样嵌入已有构建记录；记录应包含原路径、Git/dirty 状态、构建类型、编译器和依赖身份。Soot 4.6.0 依赖 jar 来自 https://repo.maven.apache.org/maven2/org/soot-oss/soot/4.6.0/soot-4.6.0-jar-with-dependencies.jar。`--android-jar` 使用该环境的 Android SDK 平台 jar。
 
 ```sh
 uv run tests/e2e/jimple_conformance.py \
