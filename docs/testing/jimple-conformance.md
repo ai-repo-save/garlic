@@ -25,7 +25,13 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 
 返回值比较保留整数类型、浮点原始位、UTF-16 代码单元、Class 名称以及数组的完整内容。字段组和 void invoke 组在调用后通过反射独立读取实际静态字段，验证已发生的写入。
 
-原 DEX 的 Dexpler/JVM 结果与 Java oracle 不一致时，该组属于源验证或 oracle 能力问题，不作为 Garlic 红样。原始 stdout、stderr 和异常堆栈保留在运行目录。MCP 输出按 UTF-8 严格读取；非法 UTF-8 原始字节仍保留在 stdout 文件中。
+原 DEX 的 Dexpler/JVM 结果与 Java oracle 不一致时，该组属于源验证或 oracle 能力问题。原始 stdout、stderr 和异常堆栈保留在运行目录。MCP 输出按 UTF-8 严格读取；非法 UTF-8 原始字节仍保留在 stdout 文件中。
+
+下列 Soot 4.6.0 与其自带 dexlib2 的异常属于源验证或 oracle 能力问题。
+
+- `const-class` 的基本类型描述符 `I`：DEX 允许该描述符。原 DEX 的 Dexpler/JVM 抛出 `NoClassDefFoundError: I`，原因是 `ClassNotFoundException: I`。
+- `const-method-handle`、`const-method-type`：`org.jf.dexlib2.writer.pool.ClassPool.internCode` 对指令引用类型 4（`METHOD_PROTO`）和 6（`METHOD_HANDLE`）抛出 `Unrecognized reference type`。同一 Soot 的 `InstructionFactory` 没有这两个 opcode，默认分支抛出 `IllegalArgumentException`。
+- `invoke-polymorphic`、`invoke-polymorphic/range`：dexlib2 写出合法指令。45cc/4rcc 的第二个引用在同 DEX 已有相同 `method_id` proto 时解析。Dexpler 将指令降为 `MethodHandle.invoke(Object[])`，写 class 时 `BPrimitiveCastInst` 抛出 `invalid fromType java.lang.Object`。
 
 ## 分组与边界
 
@@ -47,12 +53,12 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 | Registers | move 家族、v15/v300、宽值和引用、高寄存器、goto 三种编码 |
 | IntIf | if-eq、if-ne、if-lt、if-gt、if-le；同一组含零、负数、正数、相等和不等整数对，返回值是按对序的位图 |
 | RefIf | 引用 if-eq、if-ne；同一引用、不同字符串、两个零寄存器、静态 null 字段与字符串、相同字符串常量、两个新对象、对象与自身 |
-| High16 | const-wide/high16 的 0、Long.MIN_VALUE、-1<<48、1<<48、0x7fff<<48；与 LongLiterals 中的同指令分开，避免被其他 long 编码失败掩盖 |
+| High16 | const-wide/high16 的 0、Long.MIN_VALUE、-1<<48、1<<48、0x7fff<<48；与 LongLiterals 中的同指令分开 |
 | TypedArrayData | 中部 fill-array-data：boolean 0/1、char 0 与 U+FFEE、float -0 与 1.5、double -0 与 2.5 |
-| CustomList / CustomRange | invoke-custom 与 invoke-custom/range。bootstrap 按 jadx `TestRawCustomInvoke` 调用 `Lookup.findStatic` 并返回 `ConstantCallSite`，目标是同组 `add(II)I` |
-| PolymorphicList / PolymorphicRange | invoke-polymorphic 与 invoke-polymorphic/range。方法引用形状按 jadx `TestPolymorphicInvoke.smali`：`MethodHandle.invoke(Object[])Object` 加调用 proto `(Ljava/lang/String;)I` |
+| CustomList / CustomRange | invoke-custom 与 invoke-custom/range。bootstrap 调用 `Lookup.findStatic` 并返回 `ConstantCallSite`，形状来自 skylot/jadx 提交 `9bdd7b01aa8563c8c9882242125fd277f4b2ed05` 的 `jadx-core/src/test/smali/invoke/TestRawCustomInvoke.smali`。本组目标方法是 `add(II)I` |
+| PolymorphicList / PolymorphicRange | invoke-polymorphic 与 invoke-polymorphic/range。方法引用为 `MethodHandle.invoke([Ljava/lang/Object;)Ljava/lang/Object;`，与 skylot/jadx 提交 `9bdd7b01aa8563c8c9882242125fd277f4b2ed05` 的 `jadx-core/src/test/smali/invoke/TestPolymorphicInvoke.smali` 相同。本组调用 proto 是 `(Ljava/lang/String;)I` |
 
-`const-string/jumbo` 验证 31c 编码，不宣称覆盖大于 65535 的真实字符串索引。寄存器样本不宣称覆盖 v65535。共享 switch payload 和 DEX 041 容器仍由库存明确显示缺口。
+`const-string/jumbo` 样本是 31c 编码的字面量 `jumbo`。寄存器样本的最高寄存器是 v302，宽值占用 v302 与 v303。
 
 ## 库存
 
@@ -61,28 +67,18 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 - `executed-verified`：包含该 opcode 的显式调用方法通过三方比较；覆盖的是所列操作数和路径。
 - `structure-only`：Garlic 输出通过 Soot 严格验证和 JVM class 清单验证，但没有包含该指令的显式调用方法通过语义比较。
 - `missing-coverage`：缺少本次候选的有效证据。合法输入被拒绝、运行结果错误或源 oracle 不适用均保留原因。
-- `explicitly-unsupported`：必须由产品契约明确授权。本测试不会把合法 opcode 的失败改成此状态。
+- `explicitly-unsupported`：必须由产品契约明确授权。
 
 样本存在与执行通过分别记录。helper 方法即使实际被间接调用，也只按结构验证计数，避免把静态可见指令误认为逐路径执行证明。格式通过表示该格式至少一个样本通过，不表示同格式全部 opcode 通过。
 
-`coverage_union` 对新语料、既有算术语料和 control-flow 实际源 DEX 做去重并集。`external_evidence` 单独保存既有通过报告或日志、源 DEX 的 SHA-256 及生成器身份。既有算术 runner 使用临时 DEX，新工具通过其现有 `cases()` 和 `dex_fixture()` 重建同输入，只扫描，不声称本轮重新执行。control-flow 使用通过报告中 `build-fixture` 命令实际产出的 DEX，读取该运行的 `tool/identity.json`。算术日志与对应构建身份必须同时提供。外部候选与本轮候选分开记录；并集不等于最新候选的全部回归验证。
-
-## 第三方能力边界
-
-这些边界来自测试依赖的实际异常或写入拒绝，不作为 Garlic 绿样或红样。
-
-- `const-class I`：DEX 允许基本类型描述符。原 DEX 的 Dexpler/JVM 抛出 `NoClassDefFoundError: I`，原因是 `ClassNotFoundException: I`。
-- `const-method-handle`、`const-method-type`：Soot 4.6.0 自带的 `org.jf.dexlib2.writer.pool.ClassPool.internCode` 对指令引用类型 4（`METHOD_PROTO`）和 6（`METHOD_HANDLE`）抛出 `Unrecognized reference type`。同一 Soot 的 `InstructionFactory` 没有这两个 opcode，默认分支抛出 `IllegalArgumentException`。测试不手写 DEX 字节，也不把缺口改成通过。
-- `invoke-polymorphic`、`invoke-polymorphic/range`：dexlib2 能写出合法指令，但只在同 DEX 已有相同 `method_id` proto 时才能解析 45cc/4rcc 的第二个引用。Dexpler 把它降成 `MethodHandle.invoke(Object[])`，写 class 时在 `BPrimitiveCastInst` 抛出 `invalid fromType java.lang.Object`。run08 源验证失败后不运行 Garlic。
-
-`invoke-custom` 与 `invoke-custom/range` 已通过 Java oracle 和原 DEX 的 Dexpler/JVM 数值比较，不属于上述边界。
+`coverage_union` 对新语料、既有算术语料和 control-flow 实际源 DEX 做去重并集。`external_evidence` 单独保存既有报告或日志、源 DEX 的 SHA-256 及生成器身份。既有算术 runner 使用临时 DEX，新工具通过其现有 `cases()` 和 `dex_fixture()` 重建同输入，只扫描。control-flow 使用所给报告中 `build-fixture` 命令实际产出的 DEX，读取该运行的 `tool/identity.json`。算术日志与对应构建身份必须同时提供。外部候选与本次运行候选分开记录。
 
 ## 规范负例
 
 - 将合法 `const/4` 的 opcode 改为规范保留值 `0x3e`，重新计算 DEX SHA-1 和 Adler-32；CLI 必须退出 2，MCP 必须报告相同失败，并记录实际 opcode 和指令位置。
 - 将合法 int array-data 的 `element_width` 改为 3，重新计算校验字段；CLI 和 MCP 必须拒绝。该宽度不对应任何 DEX 原始元素类型。
 
-合法的 filled-new-array、filled-new-array/range 和其他未实现指令属于正例。拒绝这些输入会使测试变红。
+合法的 filled-new-array、filled-new-array/range 和其他未实现指令属于正例。
 
 ## 显式运行
 
@@ -90,14 +86,14 @@ Soot `ClassConstant.v()` 要求 slash 分隔的描述符，例如 `Ljava/lang/St
 
 ```sh
 uv run tests/e2e/jimple_conformance.py \
-  --garlic build/validation-tools/candidate/tool/garlic \
-  --build-identity build/validation-tools/candidate/tool/identity.txt \
-  --soot-jar build/validation-tools/soot-4.6.0-jar-with-dependencies.jar \
-  --android-jar /home/dev/Android/Sdk/platforms/android-34/android.jar \
-  --arithmetic-evidence-log build/validation-tools/arithmetic-pass.log \
-  --arithmetic-build-identity build/validation-tools/arithmetic-candidate/tool/identity.json \
-  --cfg-report build/validation-tools/control-flow/accepted-run/report.json \
-  --work-dir build/validation-tools/conformance/unique-run
+  --garlic <candidate>/tool/garlic \
+  --build-identity <candidate>/tool/identity.txt \
+  --soot-jar <soot-4.6.0-jar-with-dependencies.jar> \
+  --android-jar <android-platform.jar> \
+  --arithmetic-evidence-log <arithmetic-evidence-log> \
+  --arithmetic-build-identity <arithmetic-candidate>/tool/identity.json \
+  --cfg-report <control-flow-report.json> \
+  --work-dir <conformance-run-dir>
 ```
 
 `--fixture-source-only` 仅验证独立输入。`--group` 可重复指定单组。编译器和消费者默认各有 180 秒预算；实际 fixture JVM 默认 10 秒预算，防止错误生成的自循环占用服务器。超时按失败记录，不重试。
