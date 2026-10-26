@@ -78,13 +78,35 @@ class Run:
             try:
                 process.communicate(stdin, timeout=self.args.timeout)
             except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-                process.communicate()
                 record["timed_out"] = True
                 self.event("command_timed_out", stage=name, timeout=self.args.timeout)
                 raise
-            record["exit_code"] = process.returncode
-        self.event("command_finished", stage=name, exit_code=process.returncode)
+            except (KeyboardInterrupt, SystemExit):
+                record["cancelled"] = True
+                self.event("command_cancelled", stage=name)
+                raise
+            finally:
+                handlers = {
+                    sig: signal.signal(sig, signal.SIG_IGN)
+                    for sig in (signal.SIGINT, signal.SIGTERM)
+                }
+                try:
+                    try:
+                        os.killpg(process.pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass  # killpg(2): the command's process group already exited.
+                    process.wait(timeout=5)
+                    record["exit_code"] = process.returncode
+                    self.event(
+                        "command_finished",
+                        stage=name,
+                        exit_code=process.returncode,
+                        cancelled=record.get("cancelled", False),
+                        timed_out=record.get("timed_out", False),
+                    )
+                finally:
+                    for sig, handler in handlers.items():
+                        signal.signal(sig, handler)
         if process.returncode:
             raise subprocess.CalledProcessError(process.returncode, command)
         return (self.work / f"{name}.stdout").read_text()
@@ -386,5 +408,11 @@ def main():
     return 1 if failures else 0
 
 
+def cancel(signum, _frame):
+    raise SystemExit(128 + signum)
+
+
 if __name__ == "__main__":
+    for cancellation_signal in (signal.SIGINT, signal.SIGTERM):
+        signal.signal(cancellation_signal, cancel)
     sys.exit(main())
