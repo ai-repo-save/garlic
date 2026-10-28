@@ -77,6 +77,28 @@ The option defaults to OFF; run this e2e explicitly by name. The address-space
 limit is not compatible with sanitizer runtimes that reserve large virtual
 address ranges. The runner's `--help` describes its CLI.
 
+## Shared DEX debug streams
+
+`dex_shared_debug_integration.py` hand-builds DEX035 streams shared by static
+and instance methods with different register counts and parameter types. It
+reads CLI smali into parameter, code-unit position, line, source, and local
+lifetime records. Independent expectations follow Android's
+[debug_info_item](https://source.android.com/docs/core/runtime/dex-format#debug-info-item)
+and [instruction formats](https://source.android.com/docs/core/runtime/instruction-formats).
+The same run checks a distinct stream, absent debug information, rejection of an
+invalid debug string index, and two DEX files with matching offsets but different
+names and lines in a multithreaded APK disassembly. It does not benchmark memory
+or throughput, execute the bytecode, or validate Java decompilation.
+
+```sh
+cmake -S . -B build -DGARLIC_DEX_SHARED_DEBUG_TEST=ON
+cmake --build build --target garlic
+ctest --test-dir build -R '^dex_shared_debug_integration$' --output-on-failure
+```
+
+The option defaults to OFF and needs only local Python and the built CLI.
+Generated DEX, APK, and smali files are temporary; no SDK or network is needed.
+
 ## DEX MUTF-8 string boundaries
 
 `dex_mutf8_integration.py` hand-builds a minimal DEX035 class and reads its source

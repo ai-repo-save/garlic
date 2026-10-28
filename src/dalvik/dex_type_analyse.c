@@ -15,7 +15,7 @@ bool match_dex_debug(jd_method *m, jd_dex_ins *ins, jd_val *val, int slot)
     if (code->debug_info_off == 0)
         return false;
 
-    dex_debug_info_item *debug_info = code->debug_info;
+    const dex_debug_info_item *debug_info = code->debug_info;
     if (debug_info == NULL)
         return false;
 
@@ -45,7 +45,7 @@ bool match_dex_debug(jd_method *m, jd_dex_ins *ins, jd_val *val, int slot)
         next = next->next;
 
     for (int i = 0; i < debug_info->dbg_size; ++i) {
-        dex_dbg_item *item = &debug_info->items[i];
+        const dex_dbg_item *item = &debug_info->items[i];
 
         if (item->reg_num == slot &&
             next != NULL &&
@@ -69,7 +69,7 @@ bool match_dex_parameter(jd_method *m, jd_stack *stack)
     jd_meta_dex *meta = dex->meta;
     encoded_method *em = m->meta_method;
     dex_code_item *code = em->code;
-    dex_debug_info_item *debug_info = code->debug_info;
+    const dex_debug_info_item *debug_info = code->debug_info;
     if (debug_info == NULL)
         return false;
     int param_itor = m->max_locals - 1;

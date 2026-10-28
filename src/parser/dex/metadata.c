@@ -885,15 +885,28 @@ static void parse_dex_code_try_item(jd_meta_dex *dex, dex_code_item *code)
     }
 }
 
+typedef struct {
+    dex_debug_info_item info;
+    size_t end_offset;
+} dex_debug_info_cache_entry;
+
 static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
 {
     mem_pool *pool = dex->pool;
-    if (code->debug_info_off == 0)
+    if (dex_invalid(dex) || code->debug_info_off == 0)
         return;
 
+    dex_debug_info_cache_entry *cached = hget_u4obj(dex->debug_info_map,
+                                                  code->debug_info_off);
+    if (cached != NULL) {
+        code->debug_info = &cached->info;
+        setup_current_offset(dex, cached->end_offset);
+        return;
+    }
+
     setup_current_offset(dex, code->debug_info_off);
-    code->debug_info = make_obj_in(dex_debug_info_item, pool);
-    dex_debug_info_item *debug_info = code->debug_info;
+    cached = make_obj_in(dex_debug_info_cache_entry, pool);
+    dex_debug_info_item *debug_info = &cached->info;
     debug_info->line_start = read_unsigned_leb128(dex);
     debug_info->parameters_size = read_unsigned_leb128(dex);
     /* 每个参数在流中至少占 1 字节，先确认计数与文件剩余字节相符。 */
@@ -901,7 +914,8 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
         dex_mark_invalid_reason(dex, "debug parameters_size exceeds the file");
         return;
     }
-    debug_info->parameter_name = make_obj_arr_in(u4, debug_info->parameters_size, pool);
+    u4 *parameter_name = make_obj_arr_in(u4, debug_info->parameters_size, pool);
+    debug_info->parameter_name = parameter_name;
 
     u4 current_offset = dex->bin->cur_off;
 
@@ -973,7 +987,7 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
     u4 itor = 0;
     for (int i = 0; i < debug_info->parameters_size; ++i) {
         u4 name_idx = read_idx_p1(dex, dex->header->string_ids_size);
-        debug_info->parameter_name[i] = name_idx;
+        parameter_name[i] = name_idx;
         if (name_idx != NO_INDEX) {
             string param_name = dex_str_of_idx(dex, name_idx);
             DEBUG_PRINT("\tparameter_name: %d %s index: %d\n",
@@ -1093,6 +1107,12 @@ static void parse_dex_code_debug_item(jd_meta_dex *dex, dex_code_item *code)
                 break;
             }
         }
+    }
+
+    if (!dex_invalid(dex)) {
+        cached->end_offset = dex->bin->cur_off;
+        hset_u4obj(dex->debug_info_map, code->debug_info_off, cached);
+        code->debug_info = debug_info;
     }
 }
 
@@ -1515,6 +1535,7 @@ static jd_meta_dex* init_dex_content(mem_pool *pool, string path)
 
 static void init_dex_extract_data(jd_meta_dex *dex)
 {
+    dex->debug_info_map = hashmap_init_in(dex->pool, (hcmp_fn) u4obj_cmp, 0);
     dex->synthetic_classes_map = hashmap_init_in(dex->pool, (hcmp_fn) u4obj_cmp, 0);
     dex->lambda_method_map = hashmap_init_in(dex->pool, (hcmp_fn) u4obj_cmp, 0);
     dex->rebuilt_lambda_bodies = hashmap_init_in(dex->pool, (hcmp_fn) u4obj_cmp, 0);

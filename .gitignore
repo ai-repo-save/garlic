@@ -8,6 +8,7 @@ cmake-build-debug/
 doc/
 cmake-build-release/
 /*.java
+!tests/dex_shared_debug_integration.py
 !tests/e2e/dex_smali_lookup_lifetime.py
 !tests/e2e/jimple_arithmetic.py
 !tests/e2e/jimple_control_flow.py

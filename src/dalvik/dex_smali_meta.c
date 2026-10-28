@@ -145,7 +145,7 @@ static void smali_write_parameters(FILE *stream, jd_meta_dex *dex,
 {
     dex_method_id *method_id = &dex->method_ids[method->method_id];
     dex_proto_id *proto = &dex->proto_ids[method_id->proto_idx];
-    dex_debug_info_item *debug = method->code == NULL ? NULL : method->code->debug_info;
+    const dex_debug_info_item *debug = method->code == NULL ? NULL : method->code->debug_info;
     int reg = (method->access_flags & ACC_DEX_STATIC) ? 0 : 1;
     u4 count = 0;
 
@@ -252,12 +252,12 @@ static void smali_write_debug_item(FILE *stream, jd_meta_dex *dex,
 void smali_write_debug_at(FILE *stream, jd_meta_dex *dex,
                           const dex_code_item *code, u4 offset, u4 *cursor)
 {
-    dex_debug_info_item *debug;
+    const dex_debug_info_item *debug;
     if (code == NULL || code->debug_info == NULL || cursor == NULL)
         return;
     debug = code->debug_info;
     while (*cursor < debug->dbg_size) {
-        dex_dbg_item *item = &debug->items[*cursor];
+        const dex_dbg_item *item = &debug->items[*cursor];
         /* A debug address may fall between instructions. Attach it to the
          * next instruction; baksmali prints it immediately before that
          * instruction either way. */

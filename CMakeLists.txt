@@ -331,6 +331,15 @@ if (GARLIC_SMALI_LOOKUP_LIFETIME_TEST)
     set_tests_properties(dex_smali_lookup_lifetime PROPERTIES LABELS "e2e")
 endif ()
 
+option(GARLIC_DEX_SHARED_DEBUG_TEST "Enable the shared DEX debug stream integration test" OFF)
+if (GARLIC_DEX_SHARED_DEBUG_TEST)
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    enable_testing()
+    add_test(NAME dex_shared_debug_integration
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/tests/dex_shared_debug_integration.py
+            $<TARGET_FILE:garlic>)
+endif ()
+
 option(GARLIC_DEX_MUTF8_TEST "Enable the DEX MUTF-8 string boundary integration test" OFF)
 if (GARLIC_DEX_MUTF8_TEST)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)

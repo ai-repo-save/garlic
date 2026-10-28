@@ -456,10 +456,10 @@ typedef struct {
 typedef struct {
     u4 line_start;
     u4 parameters_size;
-    u4 *parameter_name;
+    const u4 *parameter_name;
 
     u4 dbg_size;
-    dex_dbg_item *items;
+    const dex_dbg_item *items;
 } dex_debug_info_item;
 
 struct dex_code_item {
@@ -475,7 +475,7 @@ struct dex_code_item {
     dex_try_item *tries;
     encoded_catch_handler_list *handlers;
 
-    dex_debug_info_item *debug_info;
+    const dex_debug_info_item *debug_info;
 };
 
 typedef struct {
@@ -557,6 +557,9 @@ typedef struct jd_meta_dex {
     u4 call_sites_size;
 
     jd_bin *bin;
+
+    /* 解析阶段独占写入；成功解析的调试流在同一 DEX 内共享，随 pool 释放。 */
+    hashmap *debug_info_map;
 
     hashmap *class_type_id_map;
 
